@@ -4,8 +4,8 @@ import sqlite3
 from typing import Any
 
 
-def insert_alert(conn: sqlite3.Connection, alert: dict[str, Any]) -> None:
-    conn.execute(
+def insert_alert(conn: sqlite3.Connection, alert: dict[str, Any]) -> int:
+    cur = conn.execute(
         """
         INSERT INTO alerts (ts_utc, type, message, severity)
         VALUES (?, ?, ?, ?)
@@ -18,6 +18,7 @@ def insert_alert(conn: sqlite3.Connection, alert: dict[str, Any]) -> None:
         ),
     )
     conn.commit()
+    return int(cur.lastrowid)
 
 
 def get_recent_alerts(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:

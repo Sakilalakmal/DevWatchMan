@@ -23,15 +23,22 @@ from app.core.config import SNAPSHOT_INTERVAL_SECONDS
 from app.storage.db import get_connection
 from app.storage.alerts import insert_alert
 from app.storage.snapshots import insert_snapshot
+from app.services.ws_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
 
 
 class SnapshotScheduler:
-    def __init__(self, interval_seconds: int = SNAPSHOT_INTERVAL_SECONDS) -> None:
+    def __init__(
+        self,
+        interval_seconds: int = SNAPSHOT_INTERVAL_SECONDS,
+        *,
+        ws_manager: WebSocketManager | None = None,
+    ) -> None:
         self._interval_seconds = interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._last_alert_sent: dict[str, float] = {}
+        self._ws_manager = ws_manager
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -60,21 +67,35 @@ class SnapshotScheduler:
         self._last_alert_sent[alert_type] = now_monotonic
         return True
 
+    async def _broadcast(self, message: dict[str, Any]) -> None:
+        if self._ws_manager is None:
+            return
+        try:
+            await self._ws_manager.broadcast_json(message)
+        except Exception:
+            logger.exception("WebSocket broadcast failed")
+
     def _emit_alert(
         self, ts_utc: str, now_monotonic: float, *, type: str, message: str, severity: str
-    ) -> bool:
+    ) -> dict[str, Any] | None:
         if not self._should_send_alert(type, now_monotonic):
-            return False
+            return None
         try:
             with get_connection() as conn:
-                insert_alert(
+                alert_id = insert_alert(
                     conn,
                     {"ts_utc": ts_utc, "type": type, "message": message, "severity": severity},
                 )
-            return True
+            return {
+                "id": alert_id,
+                "ts_utc": ts_utc,
+                "type": type,
+                "severity": severity,
+                "message": message,
+            }
         except Exception:
             logger.exception("Failed to insert alert type=%s", type)
-            return False
+            return None
 
     async def _run(self) -> None:
         while True:
@@ -117,31 +138,67 @@ class SnapshotScheduler:
             except Exception:
                 logger.exception("Failed to insert snapshot")
 
+            await self._broadcast(
+                {
+                    "type": "kpi",
+                    "v": 1,
+                    "ts_utc": ts_utc,
+                    "data": {
+                        "cpu_percent": snapshot.get("cpu_percent"),
+                        "mem_percent": snapshot.get("mem_percent"),
+                        "mem_used_bytes": snapshot.get("mem_used_bytes"),
+                        "mem_avail_bytes": snapshot.get("mem_avail_bytes"),
+                        "mem_total_bytes": snapshot.get("mem_total_bytes"),
+                        "disk_percent": snapshot.get("disk_percent"),
+                        "disk_used_bytes": snapshot.get("disk_used_bytes"),
+                        "disk_free_bytes": snapshot.get("disk_free_bytes"),
+                        "disk_total_bytes": snapshot.get("disk_total_bytes"),
+                        "net_sent_bps": snapshot.get("net_sent_bps"),
+                        "net_recv_bps": snapshot.get("net_recv_bps"),
+                        "network_quality": net_quality,
+                        "ping_latency_ms": latency_ms,
+                    },
+                }
+            )
+            await self._broadcast(
+                {
+                    "type": "chart_point",
+                    "v": 1,
+                    "ts_utc": ts_utc,
+                    "data": {
+                        "cpu_percent": snapshot.get("cpu_percent"),
+                        "mem_percent": snapshot.get("mem_percent"),
+                    },
+                }
+            )
+
             alerts_inserted = 0
 
             cpu_percent = float(snapshot.get("cpu_percent") or 0.0)
             if cpu_percent >= ALERT_CPU_PERCENT:
-                alerts_inserted += int(
-                    self._emit_alert(
-                        ts_utc,
-                        now_mono,
-                        type="cpu_high",
-                        message=f"CPU usage high: {cpu_percent:.1f}%",
-                        severity="warning",
-                    )
+                alert = self._emit_alert(
+                    ts_utc,
+                    now_mono,
+                    type="cpu_high",
+                    message=f"CPU usage high: {cpu_percent:.1f}%",
+                    severity="warning",
                 )
+                if alert:
+                    alerts_inserted += 1
+                    await self._broadcast({"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert})
 
             mem_percent = float(snapshot.get("mem_percent") or 0.0)
             if mem_percent >= ALERT_RAM_PERCENT:
-                alerts_inserted += int(
-                    self._emit_alert(
-                        ts_utc,
-                        now_mono,
-                        type="ram_high",
-                        message=f"RAM usage high: {mem_percent:.1f}%",
-                        severity="warning",
-                    )
+                alert = self._emit_alert(
+                    ts_utc,
+                    now_mono,
+                    type="ram_high",
+                    message=f"RAM usage high: {mem_percent:.1f}%",
+                    severity="warning",
                 )
+                if alert:
+                    alerts_inserted += 1
+                    await self._broadcast({"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert})
 
             down_ports = [
                 int(p["port"])
@@ -149,28 +206,30 @@ class SnapshotScheduler:
                 if isinstance(p, dict) and (not bool(p.get("listening")))
             ]
             if down_ports:
-                alerts_inserted += int(
-                    self._emit_alert(
-                        ts_utc,
-                        now_mono,
-                        type="port_down",
-                        message=f"Required port(s) down: {', '.join(map(str, down_ports))}",
-                        severity="critical",
-                    )
+                alert = self._emit_alert(
+                    ts_utc,
+                    now_mono,
+                    type="port_down",
+                    message=f"Required port(s) down: {', '.join(map(str, down_ports))}",
+                    severity="critical",
                 )
+                if alert:
+                    alerts_inserted += 1
+                    await self._broadcast({"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert})
 
             if net_quality in {"offline", "poor"}:
                 severity = "critical" if net_quality == "offline" else "warning"
                 latency_str = "N/A" if latency_ms is None else f"{latency_ms:.0f}ms"
-                alerts_inserted += int(
-                    self._emit_alert(
-                        ts_utc,
-                        now_mono,
-                        type="network_poor",
-                        message=f"Network {net_quality} (ping {NETWORK_PING_HOST} latency {latency_str})",
-                        severity=severity,
-                    )
+                alert = self._emit_alert(
+                    ts_utc,
+                    now_mono,
+                    type="network_poor",
+                    message=f"Network {net_quality} (ping {NETWORK_PING_HOST} latency {latency_str})",
+                    severity=severity,
                 )
+                if alert:
+                    alerts_inserted += 1
+                    await self._broadcast({"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert})
 
             logger.info(
                 "snapshot ts=%s inserted=%s alerts=%d cpu=%.1f mem=%.1f disk=%.1f net_tx=%.0f net_rx=%.0f net_q=%s",

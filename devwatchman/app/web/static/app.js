@@ -1,15 +1,20 @@
 /* global Chart */
 
+const NA = "\u2014";
+
 const state = {
-  endpointOk: {
-    summary: false,
-    ports: false,
-    network: false,
-    alerts: false,
-    history: false,
-  },
-  lastUpdatedIso: null,
   chart: null,
+  chartTsMs: [],
+  alerts: [],
+  ws: {
+    connected: false,
+    disconnectedSinceMs: null,
+    reconnectDelayMs: 1000,
+    socket: null,
+  },
+  fallback: {
+    enabled: false,
+  },
 };
 
 function $(id) {
@@ -23,7 +28,7 @@ function setText(id, value) {
 }
 
 function formatNumber(value, digits = 1) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  if (value === null || value === undefined || Number.isNaN(value)) return NA;
   return new Intl.NumberFormat(undefined, {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits,
@@ -31,7 +36,7 @@ function formatNumber(value, digits = 1) {
 }
 
 function formatBytes(bytes) {
-  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return "—";
+  if (bytes === null || bytes === undefined || Number.isNaN(bytes)) return NA;
   const units = ["B", "KB", "MB", "GB", "TB"];
   let val = Math.max(0, bytes);
   let i = 0;
@@ -44,7 +49,7 @@ function formatBytes(bytes) {
 }
 
 function formatRate(bytesPerSec) {
-  if (bytesPerSec === null || bytesPerSec === undefined || Number.isNaN(bytesPerSec)) return "—";
+  if (bytesPerSec === null || bytesPerSec === undefined || Number.isNaN(bytesPerSec)) return NA;
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
@@ -59,15 +64,24 @@ function badgeClass(severity) {
   }
 }
 
-function updateGlobalStatus() {
-  const ok = Object.values(state.endpointOk).every(Boolean);
+function updateWsBadge() {
   const dot = $("dot-status");
   const text = $("text-status");
   const backend = $("backend-status");
 
-  if (dot) dot.className = `h-2 w-2 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`;
-  if (text) text.textContent = ok ? "ok" : "degraded";
-  if (backend) backend.textContent = ok ? "ok" : "degraded";
+  if (state.ws.connected) {
+    if (dot) dot.className = "h-2 w-2 rounded-full bg-emerald-400";
+    if (text) text.textContent = "live";
+    if (backend) backend.textContent = "live";
+  } else {
+    if (dot) dot.className = "h-2 w-2 rounded-full bg-amber-400";
+    if (text) text.textContent = "degraded";
+    if (backend) backend.textContent = "degraded";
+  }
+}
+
+function updateLastUpdated() {
+  setText("last-updated", new Date().toLocaleTimeString());
 }
 
 async function fetchJson(url, controller) {
@@ -81,9 +95,10 @@ async function fetchJson(url, controller) {
   return await res.json();
 }
 
-function poll(name, url, intervalMs, handler) {
+function makePoller(url, intervalMs, handler) {
   let controller = null;
   let requestSeq = 0;
+  let intervalId = null;
 
   const tick = async () => {
     requestSeq += 1;
@@ -94,56 +109,65 @@ function poll(name, url, intervalMs, handler) {
     try {
       const json = await fetchJson(url, controller);
       if (seq !== requestSeq) return;
-      const ok = handler(json);
-      state.endpointOk[name] = ok !== false;
-    } catch (err) {
+      handler(json);
+    } catch (_) {
       if (seq !== requestSeq) return;
-      state.endpointOk[name] = false;
       handler(null);
-    } finally {
-      if (seq !== requestSeq) return;
-      updateGlobalStatus();
     }
   };
 
-  tick();
-  window.setInterval(tick, intervalMs);
+  return {
+    start() {
+      if (intervalId) return;
+      tick();
+      intervalId = window.setInterval(tick, intervalMs);
+    },
+    stop() {
+      if (intervalId) {
+        window.clearInterval(intervalId);
+        intervalId = null;
+      }
+      if (controller) controller.abort();
+      controller = null;
+    },
+  };
 }
 
-function handleSummary(json) {
-  if (!json || !json.ok || !json.data) {
-    setText("kpi-cpu", "—");
-    setText("kpi-ram", "—");
-    setText("kpi-disk", "—");
-    setText("kpi-net-up", "—");
-    setText("kpi-net-down", "—");
-    setText("kpi-ram-bytes", "—");
-    setText("kpi-disk-bytes", "—");
-    return false;
+function renderKpis(kpi) {
+  if (!kpi) {
+    setText("kpi-cpu", NA);
+    setText("kpi-ram", NA);
+    setText("kpi-disk", NA);
+    setText("kpi-net-up", NA);
+    setText("kpi-net-down", NA);
+    setText("kpi-ram-bytes", NA);
+    setText("kpi-disk-bytes", NA);
+    return;
   }
 
-  const d = json.data;
-  setText("kpi-cpu", formatNumber(d.cpu_percent ?? null, 1));
-  setText("kpi-ram", formatNumber(d.mem_percent ?? null, 1));
-  setText("kpi-disk", formatNumber(d.disk_percent ?? null, 1));
-  setText("kpi-net-up", formatRate(d.net_sent_bps ?? null));
-  setText("kpi-net-down", formatRate(d.net_recv_bps ?? null));
+  setText("kpi-cpu", formatNumber(kpi.cpu_percent ?? null, 1));
+  setText("kpi-ram", formatNumber(kpi.mem_percent ?? null, 1));
+  setText("kpi-disk", formatNumber(kpi.disk_percent ?? null, 1));
+  setText("kpi-net-up", formatRate(kpi.net_sent_bps ?? null));
+  setText("kpi-net-down", formatRate(kpi.net_recv_bps ?? null));
+
   setText(
     "kpi-ram-bytes",
-    d.mem_used_bytes != null && d.mem_total_bytes != null
-      ? `${formatBytes(d.mem_used_bytes)} / ${formatBytes(d.mem_total_bytes)}`
-      : "—",
+    kpi.mem_used_bytes != null && kpi.mem_total_bytes != null
+      ? `${formatBytes(kpi.mem_used_bytes)} / ${formatBytes(kpi.mem_total_bytes)}`
+      : NA,
   );
   setText(
     "kpi-disk-bytes",
-    d.disk_used_bytes != null && d.disk_total_bytes != null
-      ? `${formatBytes(d.disk_used_bytes)} / ${formatBytes(d.disk_total_bytes)}`
-      : "—",
+    kpi.disk_used_bytes != null && kpi.disk_total_bytes != null
+      ? `${formatBytes(kpi.disk_used_bytes)} / ${formatBytes(kpi.disk_total_bytes)}`
+      : NA,
   );
+}
 
-  state.lastUpdatedIso = new Date().toISOString();
-  setText("last-updated", new Date().toLocaleTimeString());
-  return true;
+function renderNetworkQuality({ status, latency_ms }) {
+  setText("kpi-net-quality", status ?? NA);
+  setText("kpi-net-latency", latency_ms == null ? "offline" : `${formatNumber(latency_ms, 0)} ms`);
 }
 
 function handlePorts(json) {
@@ -151,8 +175,8 @@ function handlePorts(json) {
   if (!tbody) return;
 
   if (!json || !json.ok || !Array.isArray(json.data)) {
-    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">—</td></tr>`;
-    return false;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
+    return;
   }
 
   const rows = json.data
@@ -172,52 +196,37 @@ function handlePorts(json) {
               ${status}
             </span>
           </td>
-          <td class="py-3 pr-3 text-slate-200">${p.pid ?? "—"}</td>
-          <td class="py-3 text-slate-200">${p.process_name ?? "—"}</td>
+          <td class="py-3 pr-3 text-slate-200">${p.pid ?? NA}</td>
+          <td class="py-3 text-slate-200">${p.process_name ?? NA}</td>
         </tr>
       `;
     })
     .join("");
 
-  tbody.innerHTML = rows || `<tr><td colspan="4" class="py-4 text-slate-400">—</td></tr>`;
-  return true;
+  tbody.innerHTML = rows || `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
 }
 
-function handleNetwork(json) {
-  if (!json || !json.ok || !json.data) {
-    setText("kpi-net-quality", "—");
-    setText("kpi-net-latency", "—");
-    return false;
-  }
-
-  const d = json.data;
-  setText("kpi-net-quality", d.status ?? "—");
-  setText("kpi-net-latency", d.latency_ms == null ? "offline" : `${formatNumber(d.latency_ms, 0)} ms`);
-  return true;
-}
-
-function handleAlerts(json) {
+function renderAlerts(alerts) {
   const list = $("alerts-list");
   const count = $("alerts-count");
   if (!list) return;
 
-  if (!json || !json.ok || !Array.isArray(json.data)) {
-    if (count) count.textContent = "—";
-    list.innerHTML = `<div class="text-sm text-slate-400">—</div>`;
-    return false;
+  if (!Array.isArray(alerts)) {
+    if (count) count.textContent = NA;
+    list.innerHTML = `<div class="text-sm text-slate-400">${NA}</div>`;
+    return;
   }
 
-  if (count) count.textContent = `${json.data.length}`;
-
-  if (json.data.length === 0) {
+  if (count) count.textContent = `${alerts.length}`;
+  if (alerts.length === 0) {
     list.innerHTML = `<div class="text-sm text-slate-400">No alerts</div>`;
     return;
   }
 
-  list.innerHTML = json.data
+  list.innerHTML = alerts
     .map((a) => {
       const sev = a.severity ?? "info";
-      const ts = a.ts_utc ? new Date(a.ts_utc).toLocaleTimeString() : "—";
+      const ts = a.ts_utc ? new Date(a.ts_utc).toLocaleTimeString() : NA;
       return `
         <div class="rounded-2xl border border-slate-800/60 bg-slate-950/20 p-3">
           <div class="flex items-center justify-between gap-2">
@@ -226,13 +235,12 @@ function handleAlerts(json) {
               ${sev}
             </span>
           </div>
-          <div class="mt-2 text-sm text-slate-100">${a.message ?? "—"}</div>
+          <div class="mt-2 text-sm text-slate-100">${a.message ?? NA}</div>
           <div class="mt-1 text-xs text-slate-400">${a.type ?? ""}</div>
         </div>
       `;
     })
     .join("");
-  return true;
 }
 
 function ensureChart() {
@@ -291,7 +299,7 @@ function ensureChart() {
   return state.chart;
 }
 
-function handleHistory(json) {
+function seedHistory(json) {
   const chart = ensureChart();
   if (!chart) return;
 
@@ -299,28 +307,230 @@ function handleHistory(json) {
     chart.data.labels = [];
     chart.data.datasets[0].data = [];
     chart.data.datasets[1].data = [];
-    chart.update();
-    return false;
+    state.chartTsMs = [];
+    chart.update("none");
+    return;
   }
 
   const rows = json.data;
-  const labels = rows.map((r) => (r.ts_utc ? new Date(r.ts_utc).toLocaleTimeString() : "—"));
-  const cpu = rows.map((r) => (typeof r.cpu_percent === "number" ? r.cpu_percent : null));
-  const ram = rows.map((r) => (typeof r.mem_percent === "number" ? r.mem_percent : null));
-
-  chart.data.labels = labels;
-  chart.data.datasets[0].data = cpu;
-  chart.data.datasets[1].data = ram;
-  chart.update();
-  return true;
+  const tsMs = rows.map((r) => (r.ts_utc ? Date.parse(r.ts_utc) : NaN));
+  chart.data.labels = rows.map((r, i) =>
+    Number.isFinite(tsMs[i]) ? new Date(tsMs[i]).toLocaleTimeString() : NA,
+  );
+  chart.data.datasets[0].data = rows.map((r) => (typeof r.cpu_percent === "number" ? r.cpu_percent : null));
+  chart.data.datasets[1].data = rows.map((r) => (typeof r.mem_percent === "number" ? r.mem_percent : null));
+  state.chartTsMs = tsMs.map((t) => (Number.isFinite(t) ? t : Date.now()));
+  chart.update("none");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  poll("summary", "/api/summary", 2000, handleSummary);
-  poll("ports", "/api/ports", 3000, handlePorts);
-  poll("network", "/api/network", 5000, handleNetwork);
-  poll("alerts", "/api/alerts?limit=10", 5000, handleAlerts);
-  poll("history", "/api/history?hours=1", 10000, handleHistory);
+function appendChartPoint(tsUtc, cpuPercent, memPercent) {
+  const chart = ensureChart();
+  if (!chart) return;
 
-  updateGlobalStatus();
+  const t = Date.parse(tsUtc);
+  const tsMs = Number.isFinite(t) ? t : Date.now();
+  chart.data.labels.push(new Date(tsMs).toLocaleTimeString());
+  chart.data.datasets[0].data.push(typeof cpuPercent === "number" ? cpuPercent : null);
+  chart.data.datasets[1].data.push(typeof memPercent === "number" ? memPercent : null);
+  state.chartTsMs.push(tsMs);
+
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  while (state.chartTsMs.length > 0 && state.chartTsMs[0] < cutoff) {
+    state.chartTsMs.shift();
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+    chart.data.datasets[1].data.shift();
+  }
+
+  const maxPoints = 1400;
+  while (state.chartTsMs.length > maxPoints) {
+    state.chartTsMs.shift();
+    chart.data.labels.shift();
+    chart.data.datasets[0].data.shift();
+    chart.data.datasets[1].data.shift();
+  }
+
+  chart.update("none");
+}
+
+function startFallback(summaryPoller, alertsPoller, networkPoller) {
+  if (state.fallback.enabled) return;
+  state.fallback.enabled = true;
+  summaryPoller.start();
+  alertsPoller.start();
+  networkPoller.start();
+}
+
+function stopFallback(summaryPoller, alertsPoller, networkPoller) {
+  if (!state.fallback.enabled) return;
+  state.fallback.enabled = false;
+  summaryPoller.stop();
+  alertsPoller.stop();
+  networkPoller.stop();
+}
+
+function connectWebSocket({ onKpi, onChartPoint, onAlert }) {
+  const scheme = window.location.protocol === "https:" ? "wss" : "ws";
+  const url = `${scheme}://${window.location.host}/ws/live`;
+
+  if (state.ws.socket) {
+    try {
+      state.ws.socket.close();
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  const ws = new WebSocket(url);
+  state.ws.socket = ws;
+
+  ws.addEventListener("open", () => {
+    state.ws.connected = true;
+    state.ws.disconnectedSinceMs = null;
+    state.ws.reconnectDelayMs = 1000;
+    updateWsBadge();
+  });
+
+  ws.addEventListener("message", (evt) => {
+    let msg = null;
+    try {
+      msg = JSON.parse(evt.data);
+    } catch (_) {
+      return;
+    }
+
+    if (!msg || msg.v !== 1 || typeof msg.type !== "string") return;
+    if (msg.type === "hello") return;
+    if (msg.type === "kpi") onKpi(msg);
+    if (msg.type === "chart_point") onChartPoint(msg);
+    if (msg.type === "alert") onAlert(msg);
+  });
+
+  const onDisconnect = () => {
+    if (state.ws.connected) {
+      state.ws.connected = false;
+      state.ws.disconnectedSinceMs = Date.now();
+      updateWsBadge();
+    }
+
+    const delay = state.ws.reconnectDelayMs;
+    state.ws.reconnectDelayMs = Math.min(state.ws.reconnectDelayMs * 2, 10000);
+    window.setTimeout(() => connectWebSocket({ onKpi, onChartPoint, onAlert }), delay);
+  };
+
+  ws.addEventListener("close", onDisconnect);
+  ws.addEventListener("error", onDisconnect);
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  updateWsBadge();
+
+  const portsPoller = makePoller("/api/ports", 3000, handlePorts);
+  portsPoller.start();
+
+  const summaryPoller = makePoller("/api/summary", 2000, (json) => {
+    if (!json || !json.ok || !json.data) {
+      renderKpis(null);
+      return;
+    }
+    renderKpis(json.data);
+    updateLastUpdated();
+  });
+
+  const alertsPoller = makePoller("/api/alerts?limit=10", 5000, (json) => {
+    if (!json || !json.ok || !Array.isArray(json.data)) {
+      renderAlerts(null);
+      return;
+    }
+    state.alerts = json.data.slice(0, 10);
+    renderAlerts(state.alerts);
+    updateLastUpdated();
+  });
+
+  const networkPoller = makePoller("/api/network", 5000, (json) => {
+    if (!json || !json.ok || !json.data) {
+      renderNetworkQuality({ status: NA, latency_ms: null });
+      return;
+    }
+    renderNetworkQuality(json.data);
+  });
+
+  try {
+    const controller = new AbortController();
+    const history = await fetchJson("/api/history?hours=1", controller);
+    seedHistory(history);
+  } catch (_) {
+    seedHistory(null);
+  }
+
+  try {
+    const controller = new AbortController();
+    const summary = await fetchJson("/api/summary", controller);
+    if (summary && summary.ok && summary.data) {
+      renderKpis(summary.data);
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  try {
+    const controller = new AbortController();
+    const alerts = await fetchJson("/api/alerts?limit=10", controller);
+    if (alerts && alerts.ok && Array.isArray(alerts.data)) {
+      state.alerts = alerts.data.slice(0, 10);
+      renderAlerts(state.alerts);
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  try {
+    const controller = new AbortController();
+    const network = await fetchJson("/api/network", controller);
+    if (network && network.ok && network.data) {
+      renderNetworkQuality(network.data);
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  connectWebSocket({
+    onKpi: (msg) => {
+      const d = msg.data || null;
+      renderKpis(d);
+      if (d && (d.network_quality || d.ping_latency_ms !== undefined)) {
+        renderNetworkQuality({ status: d.network_quality, latency_ms: d.ping_latency_ms });
+      }
+      updateLastUpdated();
+    },
+    onChartPoint: (msg) => {
+      const d = msg.data || {};
+      appendChartPoint(msg.ts_utc, d.cpu_percent, d.mem_percent);
+    },
+    onAlert: (msg) => {
+      const a = msg.data || null;
+      if (!a) return;
+      const alert = {
+        id: a.id,
+        ts_utc: a.ts_utc || msg.ts_utc,
+        type: a.type,
+        severity: a.severity,
+        message: a.message,
+      };
+      state.alerts = [alert, ...state.alerts.filter((x) => x.id !== alert.id)].slice(0, 10);
+      renderAlerts(state.alerts);
+      updateLastUpdated();
+    },
+  });
+
+  window.setInterval(() => {
+    if (state.ws.connected) {
+      stopFallback(summaryPoller, alertsPoller, networkPoller);
+      return;
+    }
+    const since = state.ws.disconnectedSinceMs;
+    if (since != null && Date.now() - since > 10000) {
+      startFallback(summaryPoller, alertsPoller, networkPoller);
+    }
+  }, 1000);
 });
