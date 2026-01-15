@@ -39,6 +39,7 @@ class SnapshotScheduler:
         self._task: asyncio.Task[None] | None = None
         self._last_alert_sent: dict[str, float] = {}
         self._ws_manager = ws_manager
+        self._last_processes_broadcast_mono: float = 0.0
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -171,6 +172,27 @@ class SnapshotScheduler:
                     },
                 }
             )
+
+            if (
+                self._ws_manager is not None
+                and await self._ws_manager.has_connections()
+                and (now_mono - self._last_processes_broadcast_mono) >= 5.0
+            ):
+                self._last_processes_broadcast_mono = now_mono
+                try:
+                    from app.collectors.processes import get_top_processes
+
+                    items = await asyncio.to_thread(get_top_processes, 10)
+                    await self._broadcast(
+                        {
+                            "type": "processes",
+                            "v": 1,
+                            "ts_utc": ts_utc,
+                            "data": {"items": items},
+                        }
+                    )
+                except Exception:
+                    logger.exception("Failed to broadcast processes")
 
             alerts_inserted = 0
 

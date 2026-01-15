@@ -6,9 +6,11 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter
 from fastapi import Query
 
+from app.collectors.processes import get_top_processes
 from app.collectors.network_quality import classify_network, ping_latency_ms
 from app.collectors.ports import get_port_status
 from app.api.schemas import AlertsResponse, HealthResponse, HistoryResponse, NetworkResponse, PortsResponse
+from app.api.schemas import ProcessesResponse
 from app.api.schemas import SnapshotResponse
 from app.core.config import HISTORY_DEFAULT_HOURS, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS, WATCH_PORTS
 from app.storage.alerts import get_recent_alerts
@@ -80,3 +82,13 @@ def alerts(limit: int = Query(default=50, ge=1, le=200)) -> AlertsResponse:
     with get_connection() as conn:
         rows = get_recent_alerts(conn, limit=limit)
     return AlertsResponse(ok=True, data=rows, meta={"limit": limit, "count": len(rows)})
+
+
+@router.get("/processes")
+async def processes(limit: int = Query(default=10, ge=1, le=50)) -> ProcessesResponse:
+    items = await asyncio.to_thread(get_top_processes, limit)
+    return ProcessesResponse(
+        ok=True,
+        data={"items": items},
+        meta={"limit": limit, "ts_utc": datetime.now(timezone.utc).isoformat()},
+    )

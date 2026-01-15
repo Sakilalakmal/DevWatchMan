@@ -81,3 +81,22 @@ class AlertsResponse(BaseModel):
     ok: bool
     data: list[AlertData] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProcessItem(BaseModel):
+    pid: int
+    name: str
+    cpu_percent: float
+    memory_bytes: int
+    status: str
+    username: str
+
+
+class ProcessesData(BaseModel):
+    items: list[ProcessItem] = Field(default_factory=list)
+
+
+class ProcessesResponse(BaseModel):
+    ok: bool
+    data: ProcessesData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)

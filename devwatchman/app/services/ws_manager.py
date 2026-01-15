@@ -44,6 +44,10 @@ class WebSocketManager:
                 except Exception:
                     pass
 
+    async def has_connections(self) -> bool:
+        async with self._lock:
+            return bool(self._connections)
+
     async def close_all(self, code: int = 1001) -> None:
         async with self._lock:
             targets = list(self._connections)
@@ -54,4 +58,3 @@ class WebSocketManager:
                 await ws.close(code=code)
             except Exception:
                 pass
-

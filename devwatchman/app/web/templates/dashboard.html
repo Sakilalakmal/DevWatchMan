@@ -67,8 +67,8 @@
               id="badge-status"
               class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
             >
-              <span id="dot-status" class="h-2 w-2 rounded-full bg-emerald-400"></span>
-              <span id="text-status">ok</span>
+              <span id="dot-status" class="h-2 w-2 rounded-full bg-amber-400"></span>
+              <span id="text-status">degraded</span>
             </div>
           </div>
         </header>
@@ -77,32 +77,32 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
             <div class="card">
               <div class="card-title">CPU</div>
-              <div class="card-value"><span id="kpi-cpu">—</span><span class="card-unit">%</span></div>
+              <div class="card-value"><span id="kpi-cpu">&mdash;</span><span class="card-unit">%</span></div>
             </div>
             <div class="card">
               <div class="card-title">RAM</div>
-              <div class="card-value"><span id="kpi-ram">—</span><span class="card-unit">%</span></div>
-              <div class="card-sub" id="kpi-ram-bytes">—</div>
+              <div class="card-value"><span id="kpi-ram">&mdash;</span><span class="card-unit">%</span></div>
+              <div class="card-sub" id="kpi-ram-bytes">&mdash;</div>
             </div>
             <div class="card">
               <div class="card-title">Disk</div>
-              <div class="card-value"><span id="kpi-disk">—</span><span class="card-unit">%</span></div>
-              <div class="card-sub" id="kpi-disk-bytes">—</div>
+              <div class="card-value"><span id="kpi-disk">&mdash;</span><span class="card-unit">%</span></div>
+              <div class="card-sub" id="kpi-disk-bytes">&mdash;</div>
             </div>
             <div class="card">
               <div class="card-title">Net Up</div>
-              <div class="card-value"><span id="kpi-net-up">—</span></div>
+              <div class="card-value"><span id="kpi-net-up">&mdash;</span></div>
               <div class="card-sub">bytes/sec</div>
             </div>
             <div class="card">
               <div class="card-title">Net Down</div>
-              <div class="card-value"><span id="kpi-net-down">—</span></div>
+              <div class="card-value"><span id="kpi-net-down">&mdash;</span></div>
               <div class="card-sub">bytes/sec</div>
             </div>
             <div class="card">
               <div class="card-title">Network Quality</div>
-              <div class="card-value"><span id="kpi-net-quality">—</span></div>
-              <div class="card-sub" id="kpi-net-latency">—</div>
+              <div class="card-value"><span id="kpi-net-quality">&mdash;</span></div>
+              <div class="card-sub" id="kpi-net-latency">&mdash;</div>
             </div>
           </div>
 
@@ -111,7 +111,7 @@
               <div class="flex items-center justify-between">
                 <div>
                   <div class="text-sm font-semibold text-slate-100">CPU & RAM (last hour)</div>
-                  <div class="text-xs text-slate-400">Auto-refresh history</div>
+                  <div class="text-xs text-slate-400">Seeded from history + live points</div>
                 </div>
               </div>
               <div class="mt-4 h-72">
@@ -119,16 +119,44 @@
               </div>
             </div>
 
-            <div class="card p-5">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-sm font-semibold text-slate-100">Alerts</div>
-                  <div class="text-xs text-slate-400">Most recent</div>
+            <div class="space-y-4">
+              <div class="card p-5">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-100">Alerts</div>
+                    <div class="text-xs text-slate-400">Most recent</div>
+                  </div>
+                  <div class="text-xs text-slate-400" id="alerts-count">&mdash;</div>
                 </div>
-                <div class="text-xs text-slate-400" id="alerts-count">—</div>
+                <div id="alerts-list" class="mt-4 space-y-2">
+                  <div class="text-sm text-slate-400">No data yet</div>
+                </div>
               </div>
-              <div id="alerts-list" class="mt-4 space-y-2">
-                <div class="text-sm text-slate-400">No data yet</div>
+
+              <div class="card p-5">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-100">Top Processes</div>
+                    <div class="text-xs text-slate-400" id="processes-status">&mdash;</div>
+                  </div>
+                </div>
+                <div class="mt-4 overflow-x-auto">
+                  <table class="w-full text-sm">
+                    <thead class="text-slate-400">
+                      <tr class="border-b border-slate-800/70">
+                        <th class="text-left py-3 pr-3 font-medium">Name</th>
+                        <th class="text-left py-3 pr-3 font-medium">PID</th>
+                        <th class="text-left py-3 pr-3 font-medium">CPU%</th>
+                        <th class="text-left py-3 font-medium">RAM</th>
+                      </tr>
+                    </thead>
+                    <tbody id="processes-body" class="divide-y divide-slate-800/60">
+                      <tr>
+                        <td colspan="4" class="py-4 text-slate-400">No data yet</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
@@ -161,10 +189,10 @@
 
           <footer class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-400">
             <div>
-              Last updated: <span id="last-updated">—</span>
+              Last updated: <span id="last-updated">&mdash;</span>
             </div>
             <div class="flex items-center gap-2">
-              Backend: <span id="backend-status">—</span>
+              Backend: <span id="backend-status">&mdash;</span>
             </div>
           </footer>
         </section>

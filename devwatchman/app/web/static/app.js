@@ -6,6 +6,7 @@ const state = {
   chart: null,
   chartTsMs: [],
   alerts: [],
+  processes: [],
   ws: {
     connected: false,
     disconnectedSinceMs: null,
@@ -68,15 +69,18 @@ function updateWsBadge() {
   const dot = $("dot-status");
   const text = $("text-status");
   const backend = $("backend-status");
+  const procStatus = $("processes-status");
 
   if (state.ws.connected) {
     if (dot) dot.className = "h-2 w-2 rounded-full bg-emerald-400";
     if (text) text.textContent = "live";
     if (backend) backend.textContent = "live";
+    if (procStatus && state.processes.length > 0) procStatus.textContent = "Live";
   } else {
     if (dot) dot.className = "h-2 w-2 rounded-full bg-amber-400";
     if (text) text.textContent = "degraded";
     if (backend) backend.textContent = "degraded";
+    if (procStatus && state.processes.length > 0) procStatus.textContent = "Fallback";
   }
 }
 
@@ -243,6 +247,45 @@ function renderAlerts(alerts) {
     .join("");
 }
 
+function renderProcesses(items) {
+  const tbody = $("processes-body");
+  const status = $("processes-status");
+  if (!tbody) return;
+
+  if (!Array.isArray(items)) {
+    if (status) status.textContent = "Unable to load processes";
+    if (state.processes.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">Unable to load processes</td></tr>`;
+    }
+    return;
+  }
+
+  if (status) status.textContent = state.ws.connected ? "Live" : "Fallback";
+
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">No processes</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items
+    .slice()
+    .map((p) => {
+      const name = p.name ?? NA;
+      const pid = p.pid ?? NA;
+      const cpu = typeof p.cpu_percent === "number" ? formatNumber(p.cpu_percent, 1) : NA;
+      const mem = typeof p.memory_bytes === "number" ? formatBytes(p.memory_bytes) : NA;
+      return `
+        <tr class="hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-100 truncate max-w-[12rem]" title="${name}">${name}</td>
+          <td class="py-3 pr-3 text-slate-200">${pid}</td>
+          <td class="py-3 pr-3 text-slate-200">${cpu}</td>
+          <td class="py-3 text-slate-200">${mem}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
 function ensureChart() {
   if (state.chart) return state.chart;
   const el = $("chart-history");
@@ -353,23 +396,25 @@ function appendChartPoint(tsUtc, cpuPercent, memPercent) {
   chart.update("none");
 }
 
-function startFallback(summaryPoller, alertsPoller, networkPoller) {
+function startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller) {
   if (state.fallback.enabled) return;
   state.fallback.enabled = true;
   summaryPoller.start();
   alertsPoller.start();
   networkPoller.start();
+  processesPoller.start();
 }
 
-function stopFallback(summaryPoller, alertsPoller, networkPoller) {
+function stopFallback(summaryPoller, alertsPoller, networkPoller, processesPoller) {
   if (!state.fallback.enabled) return;
   state.fallback.enabled = false;
   summaryPoller.stop();
   alertsPoller.stop();
   networkPoller.stop();
+  processesPoller.stop();
 }
 
-function connectWebSocket({ onKpi, onChartPoint, onAlert }) {
+function connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }) {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${scheme}://${window.location.host}/ws/live`;
 
@@ -404,6 +449,7 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert }) {
     if (msg.type === "kpi") onKpi(msg);
     if (msg.type === "chart_point") onChartPoint(msg);
     if (msg.type === "alert") onAlert(msg);
+    if (msg.type === "processes") onProcesses(msg);
   });
 
   const onDisconnect = () => {
@@ -415,7 +461,7 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert }) {
 
     const delay = state.ws.reconnectDelayMs;
     state.ws.reconnectDelayMs = Math.min(state.ws.reconnectDelayMs * 2, 10000);
-    window.setTimeout(() => connectWebSocket({ onKpi, onChartPoint, onAlert }), delay);
+    window.setTimeout(() => connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }), delay);
   };
 
   ws.addEventListener("close", onDisconnect);
@@ -453,6 +499,17 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
     renderNetworkQuality(json.data);
+  });
+
+  const processesPoller = makePoller("/api/processes?limit=10", 5000, (json) => {
+    const items = json?.ok ? json?.data?.items : null;
+    if (!Array.isArray(items)) {
+      renderProcesses(null);
+      return;
+    }
+    state.processes = items.slice(0, 10);
+    renderProcesses(state.processes);
+    updateLastUpdated();
   });
 
   try {
@@ -494,6 +551,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     // ignore
   }
 
+  try {
+    const controller = new AbortController();
+    const processes = await fetchJson("/api/processes?limit=10", controller);
+    const items = processes?.ok ? processes?.data?.items : null;
+    if (Array.isArray(items)) {
+      state.processes = items.slice(0, 10);
+      renderProcesses(state.processes);
+    }
+  } catch (_) {
+    // ignore
+  }
+
   connectWebSocket({
     onKpi: (msg) => {
       const d = msg.data || null;
@@ -521,16 +590,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderAlerts(state.alerts);
       updateLastUpdated();
     },
+    onProcesses: (msg) => {
+      const items = msg?.data?.items;
+      if (!Array.isArray(items)) {
+        renderProcesses(null);
+        return;
+      }
+      state.processes = items.slice(0, 10);
+      renderProcesses(state.processes);
+      updateLastUpdated();
+    },
   });
 
   window.setInterval(() => {
     if (state.ws.connected) {
-      stopFallback(summaryPoller, alertsPoller, networkPoller);
+      stopFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);
       return;
     }
     const since = state.ws.disconnectedSinceMs;
     if (since != null && Date.now() - since > 10000) {
-      startFallback(summaryPoller, alertsPoller, networkPoller);
+      startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);
     }
   }, 1000);
 });
