@@ -71,11 +71,32 @@ def init_db() -> None:
                 ts_utc TEXT NOT NULL,
                 type TEXT NOT NULL,
                 message TEXT NOT NULL,
-                severity TEXT NOT NULL
+                severity TEXT NOT NULL,
+                acknowledged INTEGER NOT NULL DEFAULT 0,
+                acknowledged_ts_utc TEXT NULL
             )
             """
         )
+        existing_alert_cols = {
+            row["name"] for row in conn.execute("PRAGMA table_info(alerts)").fetchall()
+        }
+        if "acknowledged" not in existing_alert_cols:
+            conn.execute(
+                "ALTER TABLE alerts ADD COLUMN acknowledged INTEGER NOT NULL DEFAULT 0"
+            )
+        if "acknowledged_ts_utc" not in existing_alert_cols:
+            conn.execute("ALTER TABLE alerts ADD COLUMN acknowledged_ts_utc TEXT NULL")
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ts_utc ON alerts(ts_utc)")
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alert_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
         conn.commit()
 
     logger.info("SQLite initialized at %s", DB_PATH)

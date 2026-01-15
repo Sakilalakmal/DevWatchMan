@@ -12,9 +12,12 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from app.api.routes import router as api_router
 from app.core.config import APP_NAME
 from app.core.logging import setup_logging
+from app.services.alert_state import AlertState
 from app.services.scheduler import SnapshotScheduler
 from app.services.ws_manager import WebSocketManager
 from app.storage.db import init_db
+from app.storage.db import get_connection
+from app.storage.alerts import get_alert_setting
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title=APP_NAME)
 app.include_router(api_router)
 app.state.ws_manager = WebSocketManager()
+app.state.alert_state = AlertState()
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
@@ -59,7 +63,23 @@ async def ws_live(ws: WebSocket) -> None:
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
-    scheduler = SnapshotScheduler(ws_manager=app.state.ws_manager)
+    with get_connection() as conn:
+        mute_until = get_alert_setting(conn, "mute_until_utc")
+    if mute_until:
+        try:
+            from datetime import datetime, timezone
+
+            dt = datetime.fromisoformat(mute_until)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            app.state.alert_state.mute_until_utc = dt
+        except Exception:
+            app.state.alert_state.mute_until_utc = None
+
+    scheduler = SnapshotScheduler(
+        ws_manager=app.state.ws_manager,
+        alert_state=app.state.alert_state,
+    )
     scheduler.start()
     app.state.scheduler = scheduler
     logger.info("%s started", APP_NAME)

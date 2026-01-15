@@ -75,11 +75,36 @@ class AlertData(BaseModel):
     type: str
     message: str
     severity: str
+    acknowledged: bool = False
+    acknowledged_ts_utc: str | None = None
 
 
 class AlertsResponse(BaseModel):
     ok: bool
     data: list[AlertData] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class AlertAckData(BaseModel):
+    id: int
+    acknowledged: bool
+    acknowledged_ts_utc: str
+
+
+class AlertAckResponse(BaseModel):
+    ok: bool
+    data: AlertAckData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class MuteStatusData(BaseModel):
+    muted: bool
+    mute_until_utc: str | None = None
+
+
+class MuteStatusResponse(BaseModel):
+    ok: bool
+    data: MuteStatusData | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
