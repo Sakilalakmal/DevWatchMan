@@ -42,3 +42,42 @@ class HistoryResponse(BaseModel):
     data: list[SnapshotData] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
 
+
+class PortStatusData(BaseModel):
+    port: int
+    listening: bool
+    pid: int | None = None
+    process_name: str | None = None
+
+
+class PortsResponse(BaseModel):
+    ok: bool
+    data: list[PortStatusData] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class NetworkData(BaseModel):
+    host: str
+    timeout_ms: int
+    latency_ms: float | None = None
+    status: str
+
+
+class NetworkResponse(BaseModel):
+    ok: bool
+    data: NetworkData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class AlertData(BaseModel):
+    id: int
+    ts_utc: str
+    type: str
+    message: str
+    severity: str
+
+
+class AlertsResponse(BaseModel):
+    ok: bool
+    data: list[AlertData] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
