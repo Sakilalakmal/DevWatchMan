@@ -63,6 +63,19 @@ def init_db() -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_snapshots_ts_utc ON snapshots(ts_utc)"
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_utc TEXT NOT NULL,
+                type TEXT NOT NULL,
+                message TEXT NOT NULL,
+                severity TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_ts_utc ON alerts(ts_utc)")
         conn.commit()
 
     logger.info("SQLite initialized at %s", DB_PATH)
