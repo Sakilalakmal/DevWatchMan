@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DevWatchMan</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            boxShadow: { card: "0 10px 30px rgba(0,0,0,.25)" },
+          },
+        },
+      };
+    </script>
+    <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}" />
+  </head>
+
+  <body class="h-full bg-[#0b1220] text-slate-200">
+    <div class="min-h-full flex">
+      <aside class="w-16 shrink-0 border-r border-slate-800/70 bg-[#070c16]">
+        <div class="h-14 flex items-center justify-center border-b border-slate-800/70">
+          <div
+            class="h-9 w-9 rounded-2xl bg-slate-900/60 border border-slate-700/50 grid place-items-center"
+            title="DevWatchMan"
+          >
+            <span class="text-xs font-semibold tracking-wide text-slate-100">D</span>
+          </div>
+        </div>
+        <nav class="p-2 space-y-2">
+          <a
+            href="/"
+            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-slate-900/40 border border-slate-800/60 text-slate-100"
+            title="Dashboard"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 12l9-9 9 9" />
+              <path d="M9 21V9h6v12" />
+            </svg>
+          </a>
+          <a
+            href="/docs"
+            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-transparent border border-slate-800/60 text-slate-300 hover:bg-slate-900/40 hover:text-slate-100"
+            title="API Docs"
+          >
+            <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20" />
+              <path d="M20 2H6.5A2.5 2.5 0 0 0 4 4.5v15" />
+              <path d="M8 7h8" />
+              <path d="M8 11h8" />
+              <path d="M8 15h6" />
+            </svg>
+          </a>
+        </nav>
+      </aside>
+
+      <main class="flex-1">
+        <header class="h-14 flex items-center justify-between px-6 border-b border-slate-800/70">
+          <div>
+            <h1 class="text-sm font-semibold tracking-wide text-slate-100">DevWatchMan</h1>
+            <p class="text-xs text-slate-400">Local system monitoring</p>
+          </div>
+          <div class="flex items-center gap-3">
+            <div
+              id="badge-status"
+              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
+            >
+              <span id="dot-status" class="h-2 w-2 rounded-full bg-emerald-400"></span>
+              <span id="text-status">ok</span>
+            </div>
+          </div>
+        </header>
+
+        <section class="p-6 space-y-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+            <div class="card">
+              <div class="card-title">CPU</div>
+              <div class="card-value"><span id="kpi-cpu">—</span><span class="card-unit">%</span></div>
+            </div>
+            <div class="card">
+              <div class="card-title">RAM</div>
+              <div class="card-value"><span id="kpi-ram">—</span><span class="card-unit">%</span></div>
+              <div class="card-sub" id="kpi-ram-bytes">—</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Disk</div>
+              <div class="card-value"><span id="kpi-disk">—</span><span class="card-unit">%</span></div>
+              <div class="card-sub" id="kpi-disk-bytes">—</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Net Up</div>
+              <div class="card-value"><span id="kpi-net-up">—</span></div>
+              <div class="card-sub">bytes/sec</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Net Down</div>
+              <div class="card-value"><span id="kpi-net-down">—</span></div>
+              <div class="card-sub">bytes/sec</div>
+            </div>
+            <div class="card">
+              <div class="card-title">Network Quality</div>
+              <div class="card-value"><span id="kpi-net-quality">—</span></div>
+              <div class="card-sub" id="kpi-net-latency">—</div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            <div class="xl:col-span-2 card p-5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm font-semibold text-slate-100">CPU & RAM (last hour)</div>
+                  <div class="text-xs text-slate-400">Auto-refresh history</div>
+                </div>
+              </div>
+              <div class="mt-4 h-72">
+                <canvas id="chart-history" class="w-full h-full"></canvas>
+              </div>
+            </div>
+
+            <div class="card p-5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-sm font-semibold text-slate-100">Alerts</div>
+                  <div class="text-xs text-slate-400">Most recent</div>
+                </div>
+                <div class="text-xs text-slate-400" id="alerts-count">—</div>
+              </div>
+              <div id="alerts-list" class="mt-4 space-y-2">
+                <div class="text-sm text-slate-400">No data yet</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-5">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-sm font-semibold text-slate-100">Ports</div>
+                <div class="text-xs text-slate-400">Watched services</div>
+              </div>
+            </div>
+            <div class="mt-4 overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead class="text-slate-400">
+                  <tr class="border-b border-slate-800/70">
+                    <th class="text-left py-3 pr-3 font-medium">Port</th>
+                    <th class="text-left py-3 pr-3 font-medium">Status</th>
+                    <th class="text-left py-3 pr-3 font-medium">PID</th>
+                    <th class="text-left py-3 font-medium">Process</th>
+                  </tr>
+                </thead>
+                <tbody id="ports-body" class="divide-y divide-slate-800/60">
+                  <tr>
+                    <td colspan="4" class="py-4 text-slate-400">No data yet</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <footer class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-400">
+            <div>
+              Last updated: <span id="last-updated">—</span>
+            </div>
+            <div class="flex items-center gap-2">
+              Backend: <span id="backend-status">—</span>
+            </div>
+          </footer>
+        </section>
+      </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </body>
+</html>
+

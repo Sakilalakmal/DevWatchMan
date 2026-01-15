@@ -1,0 +1,41 @@
+:root {
+  color-scheme: dark;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.35);
+  border: 1px solid rgba(51, 65, 85, 0.35);
+  border-radius: 1.25rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  padding: 1.25rem;
+}
+
+.card-title {
+  font-size: 0.75rem;
+  color: rgb(148 163 184);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.card-value {
+  margin-top: 0.5rem;
+  font-size: 1.5rem;
+  font-weight: 650;
+  color: rgb(241 245 249);
+  display: flex;
+  gap: 0.25rem;
+  align-items: baseline;
+}
+
+.card-unit {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgb(148 163 184);
+}
+
+.card-sub {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: rgb(148 163 184);
+}
+
