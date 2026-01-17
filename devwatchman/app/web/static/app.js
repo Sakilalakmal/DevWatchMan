@@ -8,6 +8,10 @@ const state = {
   alerts: [],
   timeline: [],
   processes: [],
+  profiles: {
+    active: "default",
+    items: [],
+  },
   listeningPorts: {
     items: [],
     query: "",
@@ -111,6 +115,16 @@ async function fetchJson(url, controller) {
   return await res.json();
 }
 
+async function postJson(url) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 function makePoller(url, intervalMs, handler) {
   let controller = null;
   let requestSeq = 0;
@@ -186,6 +200,32 @@ function renderNetworkQuality({ status, latency_ms }) {
   setText("kpi-net-latency", latency_ms == null ? "offline" : `${formatNumber(latency_ms, 0)} ms`);
 }
 
+function setActiveProfileUi(name) {
+  const n = String(name ?? "default");
+  state.profiles.active = n;
+  setText("profile-active", n);
+
+  const title = $("watched-ports-title");
+  if (title) title.textContent = `Ports (${n})`;
+
+  const subtitle = $("watched-ports-subtitle");
+  if (subtitle) subtitle.textContent = "Watched services";
+
+  const select = $("profile-select");
+  if (select && select.value !== n) select.value = n;
+}
+
+function populateProfileSelect(items, active) {
+  const select = $("profile-select");
+  if (!select) return;
+  const current = active ?? select.value ?? "default";
+  select.innerHTML = items
+    .slice()
+    .map((p) => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`)
+    .join("");
+  select.value = current;
+}
+
 function handlePorts(json) {
   const tbody = $("ports-body");
   if (!tbody) return;
@@ -194,6 +234,9 @@ function handlePorts(json) {
     tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
     return;
   }
+
+  const metaProfile = json?.meta?.profile;
+  if (metaProfile) setActiveProfileUi(metaProfile);
 
   const rows = json.data
     .slice()
@@ -572,6 +615,12 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onPro
     if (msg.type === "timeline_event") onTimelineEvent(msg);
     if (msg.type === "processes") onProcesses(msg);
     if (msg.type === "listening_ports" && onListeningPorts) onListeningPorts(msg);
+    if (msg.type === "profile" && msg.data) {
+      setActiveProfileUi(msg.data.active);
+      if (Array.isArray(state.profiles.items) && state.profiles.items.length > 0) {
+        populateProfileSelect(state.profiles.items, msg.data.active);
+      }
+    }
   });
 
   const onDisconnect = () => {
@@ -601,6 +650,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const listeningPortsPoller = makePoller("/api/ports/listening?limit=2000", 5000, handleListeningPorts);
   listeningPortsPoller.start();
+
+  try {
+    const controller = new AbortController();
+    const profiles = await fetchJson("/api/profiles", controller);
+    if (profiles?.ok && profiles?.data) {
+      const active = profiles.data.active ?? "default";
+      const items = Array.isArray(profiles.data.profiles) ? profiles.data.profiles : [];
+      state.profiles.items = items;
+      populateProfileSelect(items, active);
+      setActiveProfileUi(active);
+    }
+  } catch (_) {
+    // ignore
+  }
 
   const summaryPoller = makePoller("/api/summary", 2000, (json) => {
     if (!json || !json.ok || !json.data) {
@@ -767,6 +830,24 @@ document.addEventListener("DOMContentLoaded", async () => {
       updateLastUpdated();
     },
   });
+
+  const profileSelect = $("profile-select");
+  if (profileSelect) {
+    profileSelect.addEventListener("change", async () => {
+      const next = profileSelect.value ?? "default";
+      try {
+        profileSelect.disabled = true;
+        const json = await postJson(`/api/profiles/select?name=${encodeURIComponent(next)}`);
+        if (json?.ok && json?.data?.active) {
+          setActiveProfileUi(json.data.active);
+        }
+      } catch (_) {
+        // ignore
+      } finally {
+        profileSelect.disabled = false;
+      }
+    });
+  }
 
   const search = $("listening-ports-search");
   if (search) {

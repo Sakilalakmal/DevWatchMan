@@ -73,6 +73,36 @@ class ListeningPortsResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class ProfileItem(BaseModel):
+    name: str
+    watch_ports: list[int] = Field(default_factory=list)
+    required_ports: list[int] = Field(default_factory=list)
+    alert_cpu_percent: int
+    alert_ram_percent: int
+
+
+class ProfilesData(BaseModel):
+    active: str
+    profiles: list[ProfileItem] = Field(default_factory=list)
+
+
+class ProfilesResponse(BaseModel):
+    ok: bool
+    data: ProfilesData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProfileSelectData(BaseModel):
+    active: str
+    profile: ProfileItem
+
+
+class ProfileSelectResponse(BaseModel):
+    ok: bool
+    data: ProfileSelectData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class NetworkData(BaseModel):
     host: str
     timeout_ms: int

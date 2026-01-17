@@ -63,6 +63,23 @@
             <p class="text-xs text-slate-400">Local system monitoring</p>
           </div>
           <div class="flex items-center gap-3">
+            <div class="hidden sm:flex items-center gap-2">
+              <select
+                id="profile-select"
+                class="rounded-xl border border-slate-800/60 bg-slate-950/20 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                title="Profile"
+              >
+                <option value="default">default</option>
+              </select>
+              <div
+                id="badge-profile"
+                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
+                title="Active profile"
+              >
+                <span class="text-slate-400">profile</span>
+                <span id="profile-active" class="text-slate-100">default</span>
+              </div>
+            </div>
             <div
               id="badge-status"
               class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
@@ -123,8 +140,8 @@
               <div class="card p-5">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100">Ports</div>
-                    <div class="text-xs text-slate-400">Watched services</div>
+                    <div class="text-sm font-semibold text-slate-100" id="watched-ports-title">Ports</div>
+                    <div class="text-xs text-slate-400" id="watched-ports-subtitle">Watched services</div>
                   </div>
                 </div>
                 <div class="mt-4 overflow-x-auto">

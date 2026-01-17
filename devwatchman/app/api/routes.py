@@ -10,11 +10,12 @@ from app.collectors.processes import get_top_processes
 from app.collectors.network_quality import classify_network, ping_latency_ms
 from app.collectors.ports import get_port_status
 from app.collectors.listening_ports import get_listening_ports
-from app.api.schemas import AlertAckResponse, AlertsResponse, HealthResponse, HistoryResponse, ListeningPortsResponse, MuteStatusResponse, NetworkResponse, PortsResponse
+from app.api.schemas import AlertAckResponse, AlertsResponse, HealthResponse, HistoryResponse, ListeningPortsResponse, MuteStatusResponse, NetworkResponse, PortsResponse, ProfileSelectResponse, ProfilesResponse
 from app.api.schemas import ProcessesResponse
 from app.api.schemas import SnapshotResponse
 from app.api.schemas import TimelineResponse
-from app.core.config import HISTORY_DEFAULT_HOURS, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS, WATCH_PORTS
+from app.core.config import HISTORY_DEFAULT_HOURS, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
+from app.core.profiles import get_profile, list_profiles, resolve_profile, set_active_profile_name
 from app.services.alert_state import AlertState
 from app.storage.alerts import acknowledge_alert, get_recent_alerts, set_alert_setting
 from app.storage.db import get_connection
@@ -92,9 +93,15 @@ def timeline_latest(
 
 
 @router.get("/ports")
-def ports() -> PortsResponse:
-    statuses = get_port_status(WATCH_PORTS)
-    return PortsResponse(ok=True, data=statuses, meta={"watch_ports": WATCH_PORTS})
+async def ports(request: Request) -> PortsResponse:
+    active_name = getattr(getattr(request.app.state, "profile_state", None), "active_name", "default")
+    profile = resolve_profile(active_name)
+    statuses = get_port_status(list(profile.watch_ports))
+    return PortsResponse(
+        ok=True,
+        data=statuses,
+        meta={"watch_ports": list(profile.watch_ports), "profile": profile.name},
+    )
 
 
 @router.get("/ports/listening")
@@ -107,6 +114,71 @@ async def listening_ports(
         ok=True,
         data={"items": items},
         meta={"limit": limit, "count": len(items), "ts_utc": now.isoformat()},
+    )
+
+
+@router.get("/profiles")
+async def profiles(request: Request) -> ProfilesResponse:
+    now = datetime.now(timezone.utc)
+    state = getattr(request.app.state, "profile_state", None)
+    active_name = getattr(state, "active_name", "default")
+    return ProfilesResponse(
+        ok=True,
+        data={
+            "active": active_name,
+            "profiles": [p.to_dict() for p in list_profiles()],
+        },
+        meta={"ts_utc": now.isoformat()},
+    )
+
+
+@router.post("/profiles/select")
+async def select_profile(request: Request, name: str = Query(..., min_length=1)) -> ProfileSelectResponse:
+    now = datetime.now(timezone.utc)
+    ts_utc = now.isoformat()
+    profile = get_profile(name)
+    if profile is None:
+        return ProfileSelectResponse(
+            ok=False,
+            data=None,
+            meta={"message": "unknown profile", "name": name, "ts_utc": ts_utc},
+        )
+
+    state = getattr(request.app.state, "profile_state", None)
+    if state is not None:
+        try:
+            async with state.lock:
+                state.active_name = profile.name
+        except Exception:
+            pass
+
+    try:
+        set_active_profile_name(profile.name)
+    except Exception:
+        return ProfileSelectResponse(
+            ok=False,
+            data=None,
+            meta={"message": "failed to persist profile", "active": profile.name, "ts_utc": ts_utc},
+        )
+
+    manager = getattr(request.app.state, "ws_manager", None)
+    if manager is not None:
+        try:
+            await manager.broadcast_json(
+                {
+                    "type": "profile",
+                    "v": 1,
+                    "ts_utc": ts_utc,
+                    "data": {"active": profile.name, "profile": profile.to_dict()},
+                }
+            )
+        except Exception:
+            pass
+
+    return ProfileSelectResponse(
+        ok=True,
+        data={"active": profile.name, "profile": profile.to_dict()},
+        meta={"ts_utc": ts_utc},
     )
 
 

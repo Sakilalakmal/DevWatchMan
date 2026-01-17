@@ -12,7 +12,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from app.api.routes import router as api_router
 from app.core.config import APP_NAME
 from app.core.logging import setup_logging
+from app.core.profiles import get_active_profile_name, resolve_profile, set_active_profile_name
 from app.services.alert_state import AlertState
+from app.services.profile_state import ProfileState
 from app.services.scheduler import SnapshotScheduler
 from app.services.ws_manager import WebSocketManager
 from app.storage.db import init_db
@@ -27,6 +29,7 @@ app = FastAPI(title=APP_NAME)
 app.include_router(api_router)
 app.state.ws_manager = WebSocketManager()
 app.state.alert_state = AlertState()
+app.state.profile_state = ProfileState()
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "web" / "templates"))
@@ -107,9 +110,19 @@ async def on_startup() -> None:
         except Exception:
             app.state.alert_state.mute_until_utc = None
 
+    stored_profile = get_active_profile_name()
+    profile = resolve_profile(stored_profile)
+    app.state.profile_state.active_name = profile.name
+    if stored_profile != profile.name:
+        try:
+            set_active_profile_name(profile.name)
+        except Exception:
+            pass
+
     scheduler = SnapshotScheduler(
         ws_manager=app.state.ws_manager,
         alert_state=app.state.alert_state,
+        profile_state=app.state.profile_state,
     )
     scheduler.start()
     app.state.scheduler = scheduler

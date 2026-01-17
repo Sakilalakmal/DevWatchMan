@@ -14,23 +14,21 @@ from app.collectors.memory import collect_memory
 from app.collectors.network import collect_network
 from app.collectors.network_quality import classify_network, ping_latency_ms
 from app.collectors.ports import get_port_status
+from app.core.profiles import resolve_profile
 from app.core.config import ALERT_COOLDOWN_SECONDS
-from app.core.config import ALERT_CPU_PERCENT
 from app.core.config import ALERT_CPU_DURATION_SECONDS
-from app.core.config import ALERT_PORTS_REQUIRED
-from app.core.config import ALERT_RAM_PERCENT
 from app.core.config import ALERT_RAM_DURATION_SECONDS
 from app.core.config import ALERT_NET_OFFLINE_SECONDS
 from app.core.config import FLAP_THRESHOLD, FLAP_WINDOW_SECONDS
 from app.core.config import NETWORK_PING_HOST
 from app.core.config import NETWORK_PING_TIMEOUT_MS
 from app.core.config import SNAPSHOT_INTERVAL_SECONDS
-from app.core.config import WATCH_PORTS
 from app.storage.db import get_connection
 from app.storage.alerts import insert_alert
 from app.storage.events import insert_event
 from app.storage.snapshots import insert_snapshot
 from app.services.alert_state import AlertState
+from app.services.profile_state import ProfileState
 from app.services.ws_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -43,12 +41,14 @@ class SnapshotScheduler:
         *,
         ws_manager: WebSocketManager | None = None,
         alert_state: AlertState | None = None,
+        profile_state: ProfileState | None = None,
     ) -> None:
         self._interval_seconds = interval_seconds
         self._task: asyncio.Task[None] | None = None
         self._last_alert_sent: dict[tuple[str, str], float] = {}
         self._ws_manager = ws_manager
         self._alert_state = alert_state
+        self._profile_state = profile_state
         self._last_processes_broadcast_mono: float = 0.0
         self._last_listening_ports_broadcast_mono: float = 0.0
         self._cpu_high_since_mono: float | None = None
@@ -176,13 +176,27 @@ class SnapshotScheduler:
             ts_utc = now_utc_dt.isoformat()
             now_mono = time.monotonic()
 
+            active_profile_name = "default"
+            if self._profile_state is not None:
+                try:
+                    async with self._profile_state.lock:
+                        active_profile_name = self._profile_state.active_name
+                except Exception:
+                    active_profile_name = "default"
+            profile = resolve_profile(active_profile_name)
+            watch_ports = list(profile.watch_ports)
+            required_ports = list(profile.required_ports)
+            required_ports_set = set(required_ports)
+            alert_cpu_percent = int(profile.alert_cpu_percent)
+            alert_ram_percent = int(profile.alert_ram_percent)
+
             cpu = self._safe_collect("cpu", collect_cpu) or {}
             mem = self._safe_collect("memory", collect_memory) or {}
             disk = self._safe_collect("disk", collect_disk) or {}
             net = self._safe_collect("network", collect_network) or {}
 
             ports_watch_statuses = self._safe_collect(
-                "ports_watch", lambda: get_port_status(WATCH_PORTS)
+                "ports_watch", lambda: get_port_status(watch_ports)
             ) or []
             latency_ms = await asyncio.to_thread(
                 ping_latency_ms, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
@@ -201,7 +215,7 @@ class SnapshotScheduler:
 
             events_to_insert: list[dict[str, Any]] = []
 
-            for port in WATCH_PORTS:
+            for port in watch_ports:
                 item = port_info.get(
                     port,
                     {"port": port, "listening": False, "pid": None, "process_name": None},
@@ -246,7 +260,7 @@ class SnapshotScheduler:
                             "ts_utc": ts_utc,
                             "kind": "port_down",
                             "message": f"Port {port} DOWN",
-                            "severity": "critical" if port in ALERT_PORTS_REQUIRED else "warning",
+                            "severity": "critical" if port in required_ports_set else "warning",
                             "meta": {"port": port},
                         }
                     )
@@ -356,10 +370,10 @@ class SnapshotScheduler:
 
             port_state: dict[int, bool] = {
                 port: bool(port_info.get(port, {}).get("listening"))
-                for port in ALERT_PORTS_REQUIRED
+                for port in required_ports
             }
 
-            for port in ALERT_PORTS_REQUIRED:
+            for port in required_ports:
                 current = port_state.get(port, False)
                 previous = self._port_last_state.get(port)
                 if previous is None:
@@ -467,7 +481,7 @@ class SnapshotScheduler:
                     logger.exception("Failed to broadcast listening_ports")
 
             cpu_percent = float(snapshot.get("cpu_percent") or 0.0)
-            if cpu_percent >= ALERT_CPU_PERCENT:
+            if cpu_percent >= alert_cpu_percent:
                 if self._cpu_high_since_mono is None:
                     self._cpu_high_since_mono = now_mono
                 if (
@@ -499,7 +513,7 @@ class SnapshotScheduler:
                 self._cpu_high_fired = False
 
             mem_percent = float(snapshot.get("mem_percent") or 0.0)
-            if mem_percent >= ALERT_RAM_PERCENT:
+            if mem_percent >= alert_ram_percent:
                 if self._ram_high_since_mono is None:
                     self._ram_high_since_mono = now_mono
                 if (
