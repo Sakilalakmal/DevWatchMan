@@ -8,9 +8,34 @@ const state = {
   alerts: [],
   timeline: [],
   processes: [],
+  history: {
+    hours: 1,
+    liveEnabled: true,
+    resolution: null,
+    points: 0,
+    sinceTsUtc: null,
+    tsMs: [],
+    charts: {
+      cpu: null,
+      ram: null,
+      net: null,
+    },
+    fetch: {
+      controller: null,
+      seq: 0,
+    },
+  },
   profiles: {
     active: "default",
     items: [],
+  },
+  docker: {
+    items: [],
+    query: "",
+    wsSeen: false,
+    available: false,
+    reason: "unknown",
+    tsUtc: null,
   },
   listeningPorts: {
     items: [],
@@ -31,6 +56,29 @@ const state = {
 
 function $(id) {
   return document.getElementById(id);
+}
+
+function applyTheme(theme) {
+  const root = document.documentElement;
+  const next = theme === "dark" ? "dark" : "light";
+  root.classList.toggle("dark", next === "dark");
+  return next;
+}
+
+function getInitialTheme() {
+  try {
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch (_) {
+    return "dark";
+  }
+}
+
+function debounce(fn, waitMs) {
+  let t = null;
+  return (...args) => {
+    if (t) window.clearTimeout(t);
+    t = window.setTimeout(() => fn(...args), waitMs);
+  };
 }
 
 function setText(id, value) {
@@ -70,14 +118,24 @@ function formatRate(bytesPerSec) {
   return `${formatBytes(bytesPerSec)}/s`;
 }
 
+function chartTheme() {
+  const isDark = document.documentElement.classList.contains("dark");
+  return {
+    isDark,
+    text: isDark ? "rgba(226, 232, 240, 0.9)" : "rgba(15, 23, 42, 0.85)",
+    muted: isDark ? "rgba(148, 163, 184, 0.9)" : "rgba(71, 85, 105, 0.85)",
+    grid: isDark ? "rgba(51, 65, 85, 0.35)" : "rgba(148, 163, 184, 0.35)",
+  };
+}
+
 function badgeClass(severity) {
   switch (severity) {
     case "critical":
-      return "bg-rose-500/15 border-rose-400/30 text-rose-200";
+      return "bg-rose-500/15 border-rose-400/30 text-rose-700 dark:text-rose-200";
     case "warning":
-      return "bg-amber-500/15 border-amber-400/30 text-amber-200";
+      return "bg-amber-500/15 border-amber-400/30 text-amber-700 dark:text-amber-200";
     default:
-      return "bg-sky-500/15 border-sky-400/30 text-sky-200";
+      return "bg-sky-500/15 border-sky-400/30 text-sky-700 dark:text-sky-200";
   }
 }
 
@@ -231,7 +289,7 @@ function handlePorts(json) {
   if (!tbody) return;
 
   if (!json || !json.ok || !Array.isArray(json.data)) {
-    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">${NA}</td></tr>`;
     return;
   }
 
@@ -244,25 +302,25 @@ function handlePorts(json) {
     .map((p) => {
       const status = p.listening ? "LISTEN" : "DOWN";
       const statusCls = p.listening
-        ? "bg-emerald-500/15 border-emerald-400/30 text-emerald-200"
-        : "bg-rose-500/15 border-rose-400/30 text-rose-200";
+        ? "bg-emerald-500/15 border-emerald-400/30 text-emerald-700 dark:text-emerald-200"
+        : "bg-rose-500/15 border-rose-400/30 text-rose-700 dark:text-rose-200";
 
       return `
-        <tr class="hover:bg-slate-900/20">
-          <td class="py-3 pr-3 text-slate-100">${p.port}</td>
+        <tr class="hover:bg-slate-900/5 dark:hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-900 dark:text-slate-100">${p.port}</td>
           <td class="py-3 pr-3">
             <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs border ${statusCls}">
               ${status}
             </span>
           </td>
-          <td class="py-3 pr-3 text-slate-200">${p.pid ?? NA}</td>
-          <td class="py-3 text-slate-200">${p.process_name ?? NA}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${p.pid ?? NA}</td>
+          <td class="py-3 text-slate-700 dark:text-slate-200">${p.process_name ?? NA}</td>
         </tr>
       `;
     })
     .join("");
 
-  tbody.innerHTML = rows || `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
+  tbody.innerHTML = rows || `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">${NA}</td></tr>`;
 }
 
 function filterListeningPorts(items, query) {
@@ -285,7 +343,7 @@ function renderListeningPorts(items) {
 
   if (!Array.isArray(items)) {
     if (meta) meta.textContent = NA;
-    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">Unable to load</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">Unable to load</td></tr>`;
     return;
   }
 
@@ -304,7 +362,7 @@ function renderListeningPorts(items) {
   }
 
   if (show.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">No matches</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">No matches</td></tr>`;
     return;
   }
 
@@ -315,11 +373,11 @@ function renderListeningPorts(items) {
       const pid = p?.pid ?? NA;
       const name = escapeHtml(p?.process_name ?? NA);
       return `
-        <tr class="hover:bg-slate-900/20">
-          <td class="py-3 pr-3 text-slate-100">${port}</td>
-          <td class="py-3 pr-3 text-slate-200">${localIp}</td>
-          <td class="py-3 pr-3 text-slate-200">${pid}</td>
-          <td class="py-3 text-slate-200 truncate max-w-[18rem]" title="${name}">${name}</td>
+        <tr class="hover:bg-slate-900/5 dark:hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-900 dark:text-slate-100">${port}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${localIp}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${pid}</td>
+          <td class="py-3 text-slate-700 dark:text-slate-200 truncate max-w-[18rem]" title="${name}">${name}</td>
         </tr>
       `;
     })
@@ -344,13 +402,13 @@ function renderAlerts(alerts) {
 
   if (!Array.isArray(alerts)) {
     if (count) count.textContent = NA;
-    list.innerHTML = `<div class="text-sm text-slate-400">${NA}</div>`;
+    list.innerHTML = `<div class="text-sm text-slate-600 dark:text-slate-400">${NA}</div>`;
     return;
   }
 
   if (count) count.textContent = `${alerts.length}`;
   if (alerts.length === 0) {
-    list.innerHTML = `<div class="text-sm text-slate-400">No alerts</div>`;
+    list.innerHTML = `<div class="text-sm text-slate-600 dark:text-slate-400">No alerts</div>`;
     return;
   }
 
@@ -359,15 +417,15 @@ function renderAlerts(alerts) {
       const sev = a.severity ?? "info";
       const ts = a.ts_utc ? new Date(a.ts_utc).toLocaleTimeString() : NA;
       return `
-        <div class="rounded-2xl border border-slate-800/60 bg-slate-950/20 p-3">
+        <div class="rounded-2xl border border-slate-200/70 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/20">
           <div class="flex items-center justify-between gap-2">
-            <div class="text-xs text-slate-400">${ts}</div>
+            <div class="text-xs text-slate-600 dark:text-slate-400">${ts}</div>
             <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs border ${badgeClass(sev)}">
               ${sev}
             </span>
           </div>
-          <div class="mt-2 text-sm text-slate-100">${a.message ?? NA}</div>
-          <div class="mt-1 text-xs text-slate-400">${a.type ?? ""}</div>
+          <div class="mt-2 text-sm text-slate-900 dark:text-slate-100">${a.message ?? NA}</div>
+          <div class="mt-1 text-xs text-slate-600 dark:text-slate-400">${a.type ?? ""}</div>
         </div>
       `;
     })
@@ -381,13 +439,13 @@ function renderTimeline(items) {
 
   if (!Array.isArray(items)) {
     if (count) count.textContent = NA;
-    list.innerHTML = `<div class="text-sm text-slate-400">${NA}</div>`;
+    list.innerHTML = `<div class="text-sm text-slate-600 dark:text-slate-400">${NA}</div>`;
     return;
   }
 
   if (count) count.textContent = `${items.length}`;
   if (items.length === 0) {
-    list.innerHTML = `<div class="text-sm text-slate-400">No events</div>`;
+    list.innerHTML = `<div class="text-sm text-slate-600 dark:text-slate-400">No events</div>`;
     return;
   }
 
@@ -396,18 +454,113 @@ function renderTimeline(items) {
       const sev = e.severity ?? "info";
       const ts = e.ts_utc ? new Date(e.ts_utc).toLocaleTimeString() : NA;
       return `
-        <div class="rounded-2xl border border-slate-800/60 bg-slate-950/20 p-3">
+        <div class="rounded-2xl border border-slate-200/70 bg-white/70 p-3 dark:border-slate-800/60 dark:bg-slate-950/20">
           <div class="flex items-center justify-between gap-2">
-            <div class="text-xs text-slate-400">${ts}</div>
+            <div class="text-xs text-slate-600 dark:text-slate-400">${ts}</div>
             <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs border ${badgeClass(sev)}">
               ${sev}
             </span>
           </div>
-          <div class="mt-2 text-sm text-slate-100">${e.message ?? NA}</div>
+          <div class="mt-2 text-sm text-slate-900 dark:text-slate-100">${e.message ?? NA}</div>
         </div>
       `;
     })
     .join("");
+}
+
+function filterDockerItems(items, query) {
+  if (!query) return items;
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((c) => {
+    const name = (c?.name ?? "").toLowerCase();
+    const image = (c?.image ?? "").toLowerCase();
+    const status = (c?.status ?? "").toLowerCase();
+    return name.includes(q) || image.includes(q) || status.includes(q);
+  });
+}
+
+function renderDocker(items) {
+  const tbody = $("docker-body");
+  const meta = $("docker-meta");
+  if (!tbody) return;
+
+  if (!Array.isArray(items)) {
+    if (meta) meta.textContent = NA;
+    tbody.innerHTML = `<tr><td colspan="7" class="py-4 text-slate-600 dark:text-slate-400">Unable to load</td></tr>`;
+    return;
+  }
+
+  const query = state.docker.query;
+  const filtered = filterDockerItems(items, query);
+  const maxRows = 50;
+  const show = filtered.slice(0, maxRows);
+  const truncated = filtered.length > maxRows;
+
+  const connected = state.docker.available;
+  const mode = state.ws.connected && state.docker.wsSeen ? "Live" : "Polling";
+  const status = connected ? "Docker connected" : `Docker unavailable: ${state.docker.reason ?? "unknown"}`;
+  if (meta) {
+    const bits = [`${status} · ${mode} · ${filtered.length} shown`];
+    if (query.trim()) bits.push(`filter: "${query.trim()}"`);
+    if (truncated) bits.push("Showing first 50");
+    meta.textContent = bits.join(" · ");
+  }
+
+  if (show.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="py-4 text-slate-600 dark:text-slate-400">No containers</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = show
+    .map((c) => {
+      const name = escapeHtml(c?.name ?? NA);
+      const stateText = String(c?.state ?? c?.status ?? NA);
+      const running = String(stateText).toLowerCase() === "running";
+      const statusCls = running
+        ? "bg-emerald-500/15 border-emerald-400/30 text-emerald-700 dark:text-emerald-200"
+        : "bg-slate-500/10 border-slate-300/40 text-slate-700 dark:border-slate-400/20 dark:text-slate-300";
+
+      const stats = c?.stats ?? {};
+      const cpu = typeof stats.cpu_percent === "number" ? formatNumber(stats.cpu_percent, 1) : NA;
+      const memPct = typeof stats.mem_percent === "number" ? formatNumber(stats.mem_percent, 1) : NA;
+      const memUsed = typeof stats.mem_usage_bytes === "number" ? formatBytes(stats.mem_usage_bytes) : NA;
+      const ports = Array.isArray(c?.ports) ? c.ports.slice(0, 2).join(", ") : "";
+      const portsMore = Array.isArray(c?.ports) && c.ports.length > 2 ? ` +${c.ports.length - 2}` : "";
+      const restarts = c?.restart_count ?? 0;
+
+      return `
+        <tr class="hover:bg-slate-900/5 dark:hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-900 dark:text-slate-100 truncate max-w-[10rem]" title="${name}">${name}</td>
+          <td class="py-3 pr-3">
+            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs border ${statusCls}">
+              ${escapeHtml(stateText)}
+            </span>
+          </td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${cpu}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${memPct}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${memUsed}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200 truncate max-w-[14rem]" title="${escapeHtml((Array.isArray(c?.ports) ? c.ports.join(', ') : '') || '')}">
+            ${escapeHtml(ports)}${escapeHtml(portsMore)}
+          </td>
+          <td class="py-3 text-slate-700 dark:text-slate-200">${restarts}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function handleDocker(json) {
+  const items = json?.ok ? json?.data?.items : null;
+  if (!Array.isArray(items)) {
+    renderDocker(null);
+    return;
+  }
+  state.docker.items = items;
+  state.docker.available = Boolean(json?.meta?.available);
+  state.docker.reason = String(json?.meta?.reason ?? "unknown");
+  state.docker.tsUtc = json?.meta?.ts_utc ?? null;
+  renderDocker(state.docker.items);
 }
 
 function renderProcesses(items) {
@@ -418,7 +571,7 @@ function renderProcesses(items) {
   if (!Array.isArray(items)) {
     if (status) status.textContent = "Unable to load processes";
     if (state.processes.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">Unable to load processes</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">Unable to load processes</td></tr>`;
     }
     return;
   }
@@ -426,7 +579,7 @@ function renderProcesses(items) {
   if (status) status.textContent = state.ws.connected ? "Live" : "Fallback";
 
   if (items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">No processes</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-600 dark:text-slate-400">No processes</td></tr>`;
     return;
   }
 
@@ -438,125 +591,344 @@ function renderProcesses(items) {
       const cpu = typeof p.cpu_percent === "number" ? formatNumber(p.cpu_percent, 1) : NA;
       const mem = typeof p.memory_bytes === "number" ? formatBytes(p.memory_bytes) : NA;
       return `
-        <tr class="hover:bg-slate-900/20">
-          <td class="py-3 pr-3 text-slate-100 truncate max-w-[12rem]" title="${name}">${name}</td>
-          <td class="py-3 pr-3 text-slate-200">${pid}</td>
-          <td class="py-3 pr-3 text-slate-200">${cpu}</td>
-          <td class="py-3 text-slate-200">${mem}</td>
+        <tr class="hover:bg-slate-900/5 dark:hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-900 dark:text-slate-100 truncate max-w-[12rem]" title="${name}">${name}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${pid}</td>
+          <td class="py-3 pr-3 text-slate-700 dark:text-slate-200">${cpu}</td>
+          <td class="py-3 text-slate-700 dark:text-slate-200">${mem}</td>
         </tr>
       `;
     })
     .join("");
 }
 
-function ensureChart() {
-  if (state.chart) return state.chart;
-  const el = $("chart-history");
-  if (!el) return null;
+function historyMaxPoints(hours) {
+  const estimate = Math.max(1, Number(hours) || 1) * 60 * 20; // ~20 points/min @ 3s interval
+  return Math.min(2000, Math.max(600, estimate));
+}
 
+function formatHistoryLabel(tsMs, hours) {
+  const d = new Date(tsMs);
+  if (hours <= 24) {
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function setHistoryError(message) {
+  const el = $("history-error");
+  if (!el) return;
+  if (!message) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = message;
+  el.classList.remove("hidden");
+}
+
+function setHistoryUi({ hours, resolution, points, sinceTsUtc }) {
+  const resolutionEl = $("history-resolution");
+  const modeEl = $("history-mode");
+  const metaEl = $("history-meta");
+  const refreshBtn = $("history-refresh");
+
+  if (resolutionEl) resolutionEl.textContent = `resolution: ${resolution ?? NA}`;
+  const aggregated = Number(hours) > 6;
+  if (modeEl) {
+    modeEl.textContent = aggregated ? "Aggregated mode" : "Live mode";
+    modeEl.className = aggregated
+      ? "inline-flex items-center rounded-full px-2.5 py-1 border border-amber-400/30 bg-amber-500/15 text-amber-700 dark:text-amber-200"
+      : "inline-flex items-center rounded-full px-2.5 py-1 border border-emerald-400/30 bg-emerald-500/15 text-emerald-700 dark:text-emerald-200";
+  }
+  if (refreshBtn) refreshBtn.classList.toggle("hidden", !aggregated);
+
+  const pointsStr = typeof points === "number" ? `${points}` : NA;
+  const sinceStr = sinceTsUtc ? new Date(sinceTsUtc).toLocaleString() : NA;
+  if (metaEl) metaEl.textContent = `${hours}h · ${pointsStr} points · since ${sinceStr}`;
+}
+
+function setActiveHistoryRange(hours) {
+  state.history.hours = hours;
+  state.history.liveEnabled = Number(hours) <= 6;
+  try {
+    window.localStorage.setItem("dwm_history_hours", String(hours));
+  } catch (_) {
+    // ignore
+  }
+
+  const btns = document.querySelectorAll(".history-range-btn");
+  btns.forEach((btn) => {
+    const btnHours = Number(btn.getAttribute("data-range-hours"));
+    const active = btnHours === Number(hours);
+    btn.className = active
+      ? "history-range-btn px-3 py-1.5 text-xs rounded-xl border border-sky-400/30 bg-sky-500/15 text-sky-700 dark:text-sky-200"
+      : "history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100";
+  });
+}
+
+function createPercentChart(canvasId, color) {
+  const el = $(canvasId);
+  if (!el) return null;
   const ctx = el.getContext("2d");
-  state.chart = new Chart(ctx, {
+  const t = chartTheme();
+  return new Chart(ctx, {
     type: "line",
     data: {
       labels: [],
       datasets: [
         {
-          label: "CPU %",
+          label: "%",
           data: [],
-          borderColor: "rgba(56, 189, 248, 0.95)",
-          backgroundColor: "rgba(56, 189, 248, 0.15)",
+          borderColor: color.border,
+          backgroundColor: color.bg,
           tension: 0.35,
           pointRadius: 0,
           borderWidth: 2,
-        },
-        {
-          label: "RAM %",
-          data: [],
-          borderColor: "rgba(52, 211, 153, 0.95)",
-          backgroundColor: "rgba(52, 211, 153, 0.12)",
-          tension: 0.35,
-          pointRadius: 0,
-          borderWidth: 2,
+          fill: true,
         },
       ],
     },
     options: {
+      animation: false,
       maintainAspectRatio: false,
       interaction: { intersect: false, mode: "index" },
       plugins: {
-        legend: { labels: { color: "rgba(226, 232, 240, 0.9)" } },
-        tooltip: { enabled: true },
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            label: (ctx2) => `${formatNumber(ctx2.parsed.y, 1)}%`,
+          },
+        },
       },
       scales: {
         x: {
-          ticks: { color: "rgba(148, 163, 184, 0.9)", maxTicksLimit: 10 },
-          grid: { color: "rgba(51, 65, 85, 0.35)" },
+          ticks: { color: t.muted, maxTicksLimit: 10 },
+          grid: { color: t.grid },
         },
         y: {
           min: 0,
           max: 100,
-          ticks: { color: "rgba(148, 163, 184, 0.9)" },
-          grid: { color: "rgba(51, 65, 85, 0.35)" },
+          ticks: { color: t.muted, callback: (v) => `${v}%` },
+          grid: { color: t.grid },
         },
       },
     },
   });
-
-  return state.chart;
 }
 
-function seedHistory(json) {
-  const chart = ensureChart();
-  if (!chart) return;
+function createNetworkChart(canvasId) {
+  const el = $(canvasId);
+  if (!el) return null;
+  const ctx = el.getContext("2d");
+  const t = chartTheme();
+  return new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: "Sent",
+          data: [],
+          borderColor: "rgba(56, 189, 248, 0.95)",
+          backgroundColor: "rgba(56, 189, 248, 0.10)",
+          tension: 0.25,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: true,
+        },
+        {
+          label: "Recv",
+          data: [],
+          borderColor: "rgba(167, 139, 250, 0.95)",
+          backgroundColor: "rgba(167, 139, 250, 0.08)",
+          tension: 0.25,
+          pointRadius: 0,
+          borderWidth: 2,
+          fill: true,
+        },
+      ],
+    },
+    options: {
+      animation: false,
+      maintainAspectRatio: false,
+      interaction: { intersect: false, mode: "index" },
+      plugins: {
+        legend: { labels: { color: t.text } },
+        tooltip: {
+          enabled: true,
+          callbacks: {
+            label: (ctx2) => `${ctx2.dataset.label}: ${formatRate(ctx2.parsed.y)}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: t.muted, maxTicksLimit: 10 },
+          grid: { color: t.grid },
+        },
+        y: {
+          ticks: {
+            color: t.muted,
+            callback: (v) => `${formatBytes(v)}/s`,
+          },
+          grid: { color: t.grid },
+        },
+      },
+    },
+  });
+}
 
-  if (!json || !json.ok || !Array.isArray(json.data)) {
-    chart.data.labels = [];
-    chart.data.datasets[0].data = [];
-    chart.data.datasets[1].data = [];
-    state.chartTsMs = [];
-    chart.update("none");
-    return;
+function ensureHistoryCharts() {
+  if (state.history.charts.cpu && state.history.charts.ram && state.history.charts.net) return;
+  state.history.charts.cpu = createPercentChart("chart-cpu", {
+    border: "rgba(56, 189, 248, 0.95)",
+    bg: "rgba(56, 189, 248, 0.15)",
+  });
+  state.history.charts.ram = createPercentChart("chart-ram", {
+    border: "rgba(52, 211, 153, 0.95)",
+    bg: "rgba(52, 211, 153, 0.12)",
+  });
+  state.history.charts.net = createNetworkChart("chart-net");
+}
+
+function applyHistoryData({ hours, labels, tsMs, cpu, ram, netSent, netRecv }) {
+  ensureHistoryCharts();
+  const cpuChart = state.history.charts.cpu;
+  const ramChart = state.history.charts.ram;
+  const netChart = state.history.charts.net;
+  if (!cpuChart || !ramChart || !netChart) return;
+
+  const maxTicks = Number(hours) <= 24 ? 10 : 8;
+  cpuChart.options.scales.x.ticks.maxTicksLimit = maxTicks;
+  ramChart.options.scales.x.ticks.maxTicksLimit = maxTicks;
+  netChart.options.scales.x.ticks.maxTicksLimit = maxTicks;
+
+  cpuChart.data.labels = labels;
+  cpuChart.data.datasets[0].data = cpu;
+  ramChart.data.labels = labels;
+  ramChart.data.datasets[0].data = ram;
+  netChart.data.labels = labels;
+  netChart.data.datasets[0].data = netSent;
+  netChart.data.datasets[1].data = netRecv;
+
+  state.history.tsMs = tsMs;
+  cpuChart.update("none");
+  ramChart.update("none");
+  netChart.update("none");
+}
+
+async function fetchAndRenderHistory(hours) {
+  const h = Number(hours) || 1;
+  setActiveHistoryRange(h);
+  setHistoryError(null);
+  setText("history-meta", "Loading history…");
+
+  state.history.fetch.seq += 1;
+  const seq = state.history.fetch.seq;
+  if (state.history.fetch.controller) state.history.fetch.controller.abort();
+  state.history.fetch.controller = new AbortController();
+
+  try {
+    const json = await fetchJson(`/api/history?hours=${encodeURIComponent(h)}`, state.history.fetch.controller);
+    if (seq !== state.history.fetch.seq) return;
+
+    if (!json || !json.ok || !Array.isArray(json.data)) {
+      setHistoryError("Unable to load history");
+      return;
+    }
+
+    const resolution = json?.meta?.resolution ?? NA;
+    const sinceTsUtc = json?.meta?.since_ts_utc ?? null;
+    const points = typeof json?.meta?.points === "number" ? json.meta.points : json.data.length;
+    setHistoryUi({ hours: h, resolution, points, sinceTsUtc });
+
+    const rows = json.data;
+    const tsMs = [];
+    const labels = [];
+    const cpu = [];
+    const ram = [];
+    const netSent = [];
+    const netRecv = [];
+
+    for (const r of rows) {
+      const t = r?.ts_utc ? Date.parse(r.ts_utc) : NaN;
+      if (!Number.isFinite(t)) continue;
+      tsMs.push(t);
+      labels.push(formatHistoryLabel(t, h));
+      cpu.push(typeof r.cpu_percent === "number" ? r.cpu_percent : null);
+      ram.push(typeof r.mem_percent === "number" ? r.mem_percent : null);
+      netSent.push(typeof r.net_sent_bps === "number" ? r.net_sent_bps : null);
+      netRecv.push(typeof r.net_recv_bps === "number" ? r.net_recv_bps : null);
+    }
+
+    const hardCap = 2000;
+    if (tsMs.length > hardCap) {
+      const stride = Math.ceil(tsMs.length / hardCap);
+      const dTs = [];
+      const dLabels = [];
+      const dCpu = [];
+      const dRam = [];
+      const dSent = [];
+      const dRecv = [];
+      for (let i = 0; i < tsMs.length; i += 1) {
+        if (i % stride !== 0 && i !== tsMs.length - 1) continue;
+        dTs.push(tsMs[i]);
+        dLabels.push(labels[i]);
+        dCpu.push(cpu[i]);
+        dRam.push(ram[i]);
+        dSent.push(netSent[i]);
+        dRecv.push(netRecv[i]);
+      }
+      applyHistoryData({ hours: h, labels: dLabels, tsMs: dTs, cpu: dCpu, ram: dRam, netSent: dSent, netRecv: dRecv });
+      return;
+    }
+
+    applyHistoryData({ hours: h, labels, tsMs, cpu, ram, netSent, netRecv });
+  } catch (_) {
+    if (seq !== state.history.fetch.seq) return;
+    setHistoryError("Unable to load history");
   }
-
-  const rows = json.data;
-  const tsMs = rows.map((r) => (r.ts_utc ? Date.parse(r.ts_utc) : NaN));
-  chart.data.labels = rows.map((r, i) =>
-    Number.isFinite(tsMs[i]) ? new Date(tsMs[i]).toLocaleTimeString() : NA,
-  );
-  chart.data.datasets[0].data = rows.map((r) => (typeof r.cpu_percent === "number" ? r.cpu_percent : null));
-  chart.data.datasets[1].data = rows.map((r) => (typeof r.mem_percent === "number" ? r.mem_percent : null));
-  state.chartTsMs = tsMs.map((t) => (Number.isFinite(t) ? t : Date.now()));
-  chart.update("none");
 }
 
-function appendChartPoint(tsUtc, cpuPercent, memPercent) {
-  const chart = ensureChart();
-  if (!chart) return;
+function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent) {
+  if (!state.history.liveEnabled) return;
+  ensureHistoryCharts();
+  const cpuChart = state.history.charts.cpu;
+  const ramChart = state.history.charts.ram;
+  if (!cpuChart || !ramChart) return;
 
   const t = Date.parse(tsUtc);
   const tsMs = Number.isFinite(t) ? t : Date.now();
-  chart.data.labels.push(new Date(tsMs).toLocaleTimeString());
-  chart.data.datasets[0].data.push(typeof cpuPercent === "number" ? cpuPercent : null);
-  chart.data.datasets[1].data.push(typeof memPercent === "number" ? memPercent : null);
-  state.chartTsMs.push(tsMs);
 
-  const cutoff = Date.now() - 60 * 60 * 1000;
-  while (state.chartTsMs.length > 0 && state.chartTsMs[0] < cutoff) {
-    state.chartTsMs.shift();
-    chart.data.labels.shift();
-    chart.data.datasets[0].data.shift();
-    chart.data.datasets[1].data.shift();
+  state.history.tsMs.push(tsMs);
+  const label = formatHistoryLabel(tsMs, state.history.hours);
+
+  cpuChart.data.labels.push(label);
+  cpuChart.data.datasets[0].data.push(typeof cpuPercent === "number" ? cpuPercent : null);
+  ramChart.data.labels.push(label);
+  ramChart.data.datasets[0].data.push(typeof memPercent === "number" ? memPercent : null);
+
+  const cutoff = Date.now() - Number(state.history.hours) * 60 * 60 * 1000;
+  while (state.history.tsMs.length > 0 && state.history.tsMs[0] < cutoff) {
+    state.history.tsMs.shift();
+    cpuChart.data.labels.shift();
+    cpuChart.data.datasets[0].data.shift();
+    ramChart.data.labels.shift();
+    ramChart.data.datasets[0].data.shift();
   }
 
-  const maxPoints = 1400;
-  while (state.chartTsMs.length > maxPoints) {
-    state.chartTsMs.shift();
-    chart.data.labels.shift();
-    chart.data.datasets[0].data.shift();
-    chart.data.datasets[1].data.shift();
+  const maxPoints = historyMaxPoints(state.history.hours);
+  while (state.history.tsMs.length > maxPoints) {
+    state.history.tsMs.shift();
+    cpuChart.data.labels.shift();
+    cpuChart.data.datasets[0].data.shift();
+    ramChart.data.labels.shift();
+    ramChart.data.datasets[0].data.shift();
   }
 
-  chart.update("none");
+  cpuChart.update("none");
+  ramChart.update("none");
 }
 
 function startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller) {
@@ -577,7 +949,7 @@ function stopFallback(summaryPoller, alertsPoller, networkPoller, processesPolle
   processesPoller.stop();
 }
 
-function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts }) {
+function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts, onDocker }) {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${scheme}://${window.location.host}/ws/live`;
 
@@ -615,6 +987,7 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onPro
     if (msg.type === "timeline_event") onTimelineEvent(msg);
     if (msg.type === "processes") onProcesses(msg);
     if (msg.type === "listening_ports" && onListeningPorts) onListeningPorts(msg);
+    if (msg.type === "docker" && onDocker) onDocker(msg);
     if (msg.type === "profile" && msg.data) {
       setActiveProfileUi(msg.data.active);
       if (Array.isArray(state.profiles.items) && state.profiles.items.length > 0) {
@@ -633,7 +1006,7 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onPro
     const delay = state.ws.reconnectDelayMs;
     state.ws.reconnectDelayMs = Math.min(state.ws.reconnectDelayMs * 2, 10000);
     window.setTimeout(
-      () => connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts }),
+      () => connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts, onDocker }),
       delay,
     );
   };
@@ -643,13 +1016,41 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onPro
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  applyTheme(getInitialTheme());
+
   updateWsBadge();
+
+  document.querySelectorAll(".history-range-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const hours = Number(btn.getAttribute("data-range-hours")) || 1;
+      fetchAndRenderHistory(hours);
+    });
+  });
+  const refreshBtn = $("history-refresh");
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      fetchAndRenderHistory(state.history.hours);
+    });
+  }
+  let initialHours = 1;
+  try {
+    const stored = Number(window.localStorage.getItem("dwm_history_hours"));
+    if (Number.isFinite(stored) && stored > 0) initialHours = stored;
+  } catch (_) {
+    // ignore
+  }
+  setActiveHistoryRange(initialHours);
+  ensureHistoryCharts();
+  fetchAndRenderHistory(initialHours);
 
   const portsPoller = makePoller("/api/ports", 3000, handlePorts);
   portsPoller.start();
 
   const listeningPortsPoller = makePoller("/api/ports/listening?limit=2000", 5000, handleListeningPorts);
   listeningPortsPoller.start();
+
+  const dockerPoller = makePoller("/api/docker/containers?include_stopped=true&limit=50", 5000, handleDocker);
+  dockerPoller.start();
 
   try {
     const controller = new AbortController();
@@ -702,14 +1103,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderProcesses(state.processes);
     updateLastUpdated();
   });
-
-  try {
-    const controller = new AbortController();
-    const history = await fetchJson("/api/history?hours=1", controller);
-    seedHistory(history);
-  } catch (_) {
-    seedHistory(null);
-  }
 
   try {
     const controller = new AbortController();
@@ -777,7 +1170,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     },
     onChartPoint: (msg) => {
       const d = msg.data || {};
-      appendChartPoint(msg.ts_utc, d.cpu_percent, d.mem_percent);
+      appendLiveHistoryPoint(msg.ts_utc, d.cpu_percent, d.mem_percent);
     },
     onAlert: (msg) => {
       const a = msg.data || null;
@@ -829,6 +1222,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderListeningPorts(state.listeningPorts.items);
       updateLastUpdated();
     },
+    onDocker: (msg) => {
+      const items = msg?.data?.items;
+      if (!Array.isArray(items)) {
+        renderDocker(null);
+        return;
+      }
+      state.docker.wsSeen = true;
+      state.docker.available = Boolean(msg?.data?.available);
+      state.docker.reason = String(msg?.data?.reason ?? "unknown");
+      state.docker.items = items;
+      state.docker.tsUtc = msg?.ts_utc ?? null;
+      renderDocker(state.docker.items);
+      updateLastUpdated();
+    },
   });
 
   const profileSelect = $("profile-select");
@@ -851,20 +1258,36 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const search = $("listening-ports-search");
   if (search) {
-    search.addEventListener("input", () => {
-      state.listeningPorts.query = search.value ?? "";
-      renderListeningPorts(state.listeningPorts.items);
-    });
+    search.addEventListener(
+      "input",
+      debounce(() => {
+        state.listeningPorts.query = search.value ?? "";
+        renderListeningPorts(state.listeningPorts.items);
+      }, 60),
+    );
+  }
+
+  const dockerSearch = $("docker-search");
+  if (dockerSearch) {
+    dockerSearch.addEventListener(
+      "input",
+      debounce(() => {
+        state.docker.query = dockerSearch.value ?? "";
+        renderDocker(state.docker.items);
+      }, 60),
+    );
   }
 
   window.setInterval(() => {
     if (state.ws.connected) {
       stopFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);
       if (state.listeningPorts.wsSeen) listeningPortsPoller.stop();
+      if (state.docker.wsSeen) dockerPoller.stop();
       return;
     }
 
     listeningPortsPoller.start();
+    dockerPoller.start();
     const since = state.ws.disconnectedSinceMs;
     if (since != null && Date.now() - since > 10000) {
       startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);

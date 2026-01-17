@@ -28,6 +28,7 @@ from app.storage.alerts import insert_alert
 from app.storage.events import insert_event
 from app.storage.snapshots import insert_snapshot
 from app.services.alert_state import AlertState
+from app.services.docker_monitor import list_containers_with_stats
 from app.services.profile_state import ProfileState
 from app.services.ws_manager import WebSocketManager
 
@@ -51,6 +52,7 @@ class SnapshotScheduler:
         self._profile_state = profile_state
         self._last_processes_broadcast_mono: float = 0.0
         self._last_listening_ports_broadcast_mono: float = 0.0
+        self._last_docker_broadcast_mono: float = 0.0
         self._cpu_high_since_mono: float | None = None
         self._cpu_high_fired: bool = False
         self._ram_high_since_mono: float | None = None
@@ -65,6 +67,11 @@ class SnapshotScheduler:
         self._watch_port_last_state: dict[int, bool] = {}
         self._watch_port_last_info: dict[int, dict[str, Any]] = {}
         self._last_net_quality: str | None = None
+        self._docker_last_running: dict[str, bool] = {}
+        self._docker_last_restart: dict[str, int] = {}
+        self._docker_state_change_times: dict[str, deque[float]] = {}
+        self._docker_restart_bump_times: dict[str, deque[float]] = {}
+        self._docker_flapping_active: set[str] = set()
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -479,6 +486,171 @@ class SnapshotScheduler:
                     )
                 except Exception:
                     logger.exception("Failed to broadcast listening_ports")
+
+            if (
+                self._ws_manager is not None
+                and await self._ws_manager.has_connections()
+                and (now_mono - self._last_docker_broadcast_mono) >= 5.0
+            ):
+                self._last_docker_broadcast_mono = now_mono
+                try:
+                    payload = await asyncio.to_thread(
+                        list_containers_with_stats,
+                        include_stopped=True,
+                        limit=50,
+                    )
+                    available = bool(payload.get("available")) if isinstance(payload, dict) else False
+                    reason = str(payload.get("reason")) if isinstance(payload, dict) else "unknown"
+                    items = payload.get("items") if isinstance(payload, dict) else []
+                    if not isinstance(items, list):
+                        items = []
+
+                    if available:
+                        flap_window = 60.0
+                        flap_threshold = 3
+                        bump_threshold = 2
+                        for c in items:
+                            if not isinstance(c, dict):
+                                continue
+                            cid = str(c.get("id") or "")
+                            name = str(c.get("name") or cid)
+                            state = str((c.get("state") or c.get("status") or "")).lower()
+                            running = state == "running"
+                            restart_count = 0
+                            try:
+                                restart_count = int(c.get("restart_count") or 0)
+                            except Exception:
+                                restart_count = 0
+
+                            prev_running = self._docker_last_running.get(cid)
+                            prev_restart = self._docker_last_restart.get(cid)
+
+                            if prev_running is None:
+                                self._docker_last_running[cid] = running
+                                self._docker_last_restart[cid] = restart_count
+                                continue
+
+                            if prev_running != running:
+                                times = self._docker_state_change_times.setdefault(cid, deque())
+                                times.append(now_mono)
+                                cutoff = now_mono - flap_window
+                                while times and times[0] < cutoff:
+                                    times.popleft()
+
+                                self._docker_last_running[cid] = running
+                                self._docker_last_restart[cid] = restart_count
+
+                                kind = "container_up" if running else "container_down"
+                                severity = "info" if running else "critical"
+                                message = f"Docker container {name} {'UP' if running else 'DOWN'}"
+                                try:
+                                    with get_connection() as conn:
+                                        event_id = insert_event(
+                                            conn,
+                                            {
+                                                "ts_utc": ts_utc,
+                                                "kind": kind,
+                                                "message": message,
+                                                "severity": severity,
+                                                "meta": {"id": cid, "name": name, "state": state},
+                                            },
+                                        )
+                                except Exception:
+                                    event_id = None
+
+                                if event_id is not None:
+                                    await self._broadcast(
+                                        {
+                                            "type": "timeline_event",
+                                            "v": 1,
+                                            "ts_utc": ts_utc,
+                                            "data": {
+                                                "id": event_id,
+                                                "kind": kind,
+                                                "severity": severity,
+                                                "message": message,
+                                            },
+                                        }
+                                    )
+
+                                if not running:
+                                    alert = await self._emit_alert(
+                                        ts_utc,
+                                        now_utc_dt,
+                                        now_mono,
+                                        type="container_down",
+                                        key=cid,
+                                        message=message,
+                                        severity="critical",
+                                    )
+                                    if alert:
+                                        await self._broadcast(
+                                            {"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert}
+                                        )
+
+                                if len(times) >= flap_threshold and cid not in self._docker_flapping_active:
+                                    alert = await self._emit_alert(
+                                        ts_utc,
+                                        now_utc_dt,
+                                        now_mono,
+                                        type="container_flapping",
+                                        key=cid,
+                                        message=f"Docker container flapping: {name} ({len(times)} state changes in {int(flap_window)}s)",
+                                        severity="warning",
+                                    )
+                                    if alert:
+                                        self._docker_flapping_active.add(cid)
+                                        await self._broadcast(
+                                            {"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert}
+                                        )
+                            else:
+                                self._docker_last_running[cid] = running
+
+                            if prev_restart is None:
+                                self._docker_last_restart[cid] = restart_count
+                            else:
+                                if restart_count > prev_restart:
+                                    bumps = self._docker_restart_bump_times.setdefault(cid, deque())
+                                    for _ in range(restart_count - prev_restart):
+                                        bumps.append(now_mono)
+                                    cutoff = now_mono - flap_window
+                                    while bumps and bumps[0] < cutoff:
+                                        bumps.popleft()
+                                    self._docker_last_restart[cid] = restart_count
+
+                                    if len(bumps) >= bump_threshold and cid not in self._docker_flapping_active:
+                                        alert = await self._emit_alert(
+                                            ts_utc,
+                                            now_utc_dt,
+                                            now_mono,
+                                            type="container_flapping",
+                                            key=cid,
+                                            message=f"Docker container restarting frequently: {name} (+{len(bumps)} in {int(flap_window)}s)",
+                                            severity="warning",
+                                        )
+                                        if alert:
+                                            self._docker_flapping_active.add(cid)
+                                            await self._broadcast(
+                                                {"type": "alert", "v": 1, "ts_utc": ts_utc, "data": alert}
+                                            )
+
+                        for cid, times in list(self._docker_state_change_times.items()):
+                            cutoff = now_mono - (flap_window * 2)
+                            while times and times[0] < cutoff:
+                                times.popleft()
+                            if not times and cid in self._docker_flapping_active:
+                                self._docker_flapping_active.discard(cid)
+
+                    await self._broadcast(
+                        {
+                            "type": "docker",
+                            "v": 1,
+                            "ts_utc": ts_utc,
+                            "data": {"available": available, "reason": reason, "items": items},
+                        }
+                    )
+                except Exception:
+                    logger.exception("Failed to broadcast docker")
 
             cpu_percent = float(snapshot.get("cpu_percent") or 0.0)
             if cpu_percent >= alert_cpu_percent:

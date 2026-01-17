@@ -103,6 +103,49 @@ class ProfileSelectResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class DockerStatusData(BaseModel):
+    available: bool
+    reason: str
+
+
+class DockerStatusResponse(BaseModel):
+    ok: bool
+    data: DockerStatusData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class DockerContainerStats(BaseModel):
+    cpu_percent: float = 0.0
+    mem_usage_bytes: int = 0
+    mem_limit_bytes: int = 0
+    mem_percent: float = 0.0
+    net_rx_bytes: int = 0
+    net_tx_bytes: int = 0
+
+
+class DockerContainerItem(BaseModel):
+    id: str
+    name: str
+    image: str
+    status: str
+    state: str
+    created: str | None = None
+    started_at: str | None = None
+    restart_count: int = 0
+    ports: list[str] = Field(default_factory=list)
+    stats: DockerContainerStats = Field(default_factory=DockerContainerStats)
+
+
+class DockerContainersData(BaseModel):
+    items: list[DockerContainerItem] = Field(default_factory=list)
+
+
+class DockerContainersResponse(BaseModel):
+    ok: bool
+    data: DockerContainersData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class NetworkData(BaseModel):
     host: str
     timeout_ms: int

@@ -10,12 +10,13 @@ from app.collectors.processes import get_top_processes
 from app.collectors.network_quality import classify_network, ping_latency_ms
 from app.collectors.ports import get_port_status
 from app.collectors.listening_ports import get_listening_ports
-from app.api.schemas import AlertAckResponse, AlertsResponse, HealthResponse, HistoryResponse, ListeningPortsResponse, MuteStatusResponse, NetworkResponse, PortsResponse, ProfileSelectResponse, ProfilesResponse
+from app.api.schemas import AlertAckResponse, AlertsResponse, DockerContainersResponse, DockerStatusResponse, HealthResponse, HistoryResponse, ListeningPortsResponse, MuteStatusResponse, NetworkResponse, PortsResponse, ProfileSelectResponse, ProfilesResponse
 from app.api.schemas import ProcessesResponse
 from app.api.schemas import SnapshotResponse
 from app.api.schemas import TimelineResponse
 from app.core.config import HISTORY_DEFAULT_HOURS, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
 from app.core.profiles import get_profile, list_profiles, resolve_profile, set_active_profile_name
+from app.services.docker_monitor import get_docker_status_cached, list_containers_with_stats
 from app.services.alert_state import AlertState
 from app.storage.alerts import acknowledge_alert, get_recent_alerts, set_alert_setting
 from app.storage.db import get_connection
@@ -143,6 +144,39 @@ async def listening_ports(
         ok=True,
         data={"items": items},
         meta={"limit": limit, "count": len(items), "ts_utc": now.isoformat()},
+    )
+
+
+@router.get("/docker/status")
+def docker_status() -> DockerStatusResponse:
+    ok, reason = get_docker_status_cached()
+    return DockerStatusResponse(ok=True, data={"available": ok, "reason": reason}, meta={})
+
+
+@router.get("/docker/containers")
+async def docker_containers(
+    include_stopped: bool = Query(default=True),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> DockerContainersResponse:
+    now = datetime.now(timezone.utc)
+    payload = await asyncio.to_thread(
+        list_containers_with_stats,
+        include_stopped=include_stopped,
+        limit=limit,
+    )
+    items = payload.get("items") if isinstance(payload, dict) else []
+    if not isinstance(items, list):
+        items = []
+    return DockerContainersResponse(
+        ok=True,
+        data={"items": items},
+        meta={
+            "available": bool(payload.get("available")) if isinstance(payload, dict) else False,
+            "reason": str(payload.get("reason")) if isinstance(payload, dict) else "unknown",
+            "limit": limit,
+            "count": len(items),
+            "ts_utc": now.isoformat(),
+        },
     )
 
 

@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
+        darkMode: "class",
         theme: {
           extend: {
             boxShadow: { card: "0 10px 30px rgba(0,0,0,.25)" },
@@ -18,21 +19,21 @@
     <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}" />
   </head>
 
-  <body class="h-full bg-[#0b1220] text-slate-200">
+  <body class="h-full bg-slate-50 text-slate-900 dark:bg-[#0b1220] dark:text-slate-200">
     <div class="min-h-full flex">
-      <aside class="w-16 shrink-0 border-r border-slate-800/70 bg-[#070c16]">
-        <div class="h-14 flex items-center justify-center border-b border-slate-800/70">
+      <aside class="w-16 shrink-0 border-r border-slate-200/70 bg-white dark:border-slate-800/70 dark:bg-[#070c16]">
+        <div class="h-14 flex items-center justify-center border-b border-slate-200/70 dark:border-slate-800/70">
           <div
-            class="h-9 w-9 rounded-2xl bg-slate-900/60 border border-slate-700/50 grid place-items-center"
+            class="h-9 w-9 rounded-2xl bg-slate-900/5 border border-slate-200/70 grid place-items-center dark:bg-slate-900/60 dark:border-slate-700/50"
             title="DevWatchMan"
           >
-            <span class="text-xs font-semibold tracking-wide text-slate-100">D</span>
+            <span class="text-xs font-semibold tracking-wide text-slate-900 dark:text-slate-100">D</span>
           </div>
         </div>
         <nav class="p-2 space-y-2">
           <a
             href="/"
-            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-slate-900/40 border border-slate-800/60 text-slate-100"
+            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-slate-900/5 border border-slate-200/70 text-slate-900 dark:bg-slate-900/40 dark:border-slate-800/60 dark:text-slate-100"
             title="Dashboard"
           >
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
@@ -42,7 +43,7 @@
           </a>
           <a
             href="/docs"
-            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-transparent border border-slate-800/60 text-slate-300 hover:bg-slate-900/40 hover:text-slate-100"
+            class="h-11 w-11 mx-auto grid place-items-center rounded-2xl bg-transparent border border-slate-200/70 text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:border-slate-800/60 dark:text-slate-300 dark:hover:bg-slate-900/40 dark:hover:text-slate-100"
             title="API Docs"
           >
             <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2">
@@ -57,32 +58,32 @@
       </aside>
 
       <main class="flex-1">
-        <header class="h-14 flex items-center justify-between px-6 border-b border-slate-800/70">
+        <header class="h-14 sticky top-0 z-30 flex items-center justify-between px-6 border-b border-slate-200/70 bg-white/80 backdrop-blur dark:border-slate-800/70 dark:bg-[#0b1220]/80">
           <div>
-            <h1 class="text-sm font-semibold tracking-wide text-slate-100">DevWatchMan</h1>
-            <p class="text-xs text-slate-400">Local system monitoring</p>
+            <h1 class="text-sm font-semibold tracking-wide text-slate-900 dark:text-slate-100">DevWatchMan</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Local system monitoring</p>
           </div>
           <div class="flex items-center gap-3">
             <div class="hidden sm:flex items-center gap-2">
               <select
                 id="profile-select"
-                class="rounded-xl border border-slate-800/60 bg-slate-950/20 px-3 py-2 text-xs text-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                class="rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-200 dark:focus:ring-sky-500/40"
                 title="Profile"
               >
                 <option value="default">default</option>
               </select>
               <div
                 id="badge-profile"
-                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
+                class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-200/70 bg-white dark:border-slate-700/60 dark:bg-slate-900/40"
                 title="Active profile"
               >
-                <span class="text-slate-400">profile</span>
-                <span id="profile-active" class="text-slate-100">default</span>
+                <span class="text-slate-500 dark:text-slate-400">profile</span>
+                <span id="profile-active" class="text-slate-900 dark:text-slate-100">default</span>
               </div>
             </div>
             <div
               id="badge-status"
-              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-700/60 bg-slate-900/40"
+              class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs border border-slate-200/70 bg-white dark:border-slate-700/60 dark:bg-slate-900/40"
             >
               <span id="dot-status" class="h-2 w-2 rounded-full bg-amber-400"></span>
               <span id="text-status">degraded</span>
@@ -125,38 +126,150 @@
 
           <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
             <div class="xl:col-span-2 space-y-4">
-              <div class="card p-5 h-[420px] flex flex-col">
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="text-sm font-semibold text-slate-100">CPU & RAM (last hour)</div>
-                    <div class="text-xs text-slate-400">Seeded from history + live points</div>
+              <div class="card p-5">
+                <div class="flex flex-col gap-3">
+                  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">History</div>
+                    <div class="text-xs text-slate-500 dark:text-slate-400" id="history-meta">
+                      Select a range to load CPU, RAM, and Network charts
+                    </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <div class="inline-flex items-center gap-1 rounded-2xl border border-slate-200/70 bg-white p-1 dark:border-slate-800/60 dark:bg-slate-950/20">
+                        <button
+                          class="history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100"
+                          data-range-hours="1"
+                          type="button"
+                        >
+                          1h
+                        </button>
+                        <button
+                          class="history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100"
+                          data-range-hours="6"
+                          type="button"
+                        >
+                          6h
+                        </button>
+                        <button
+                          class="history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100"
+                          data-range-hours="24"
+                          type="button"
+                        >
+                          24h
+                        </button>
+                        <button
+                          class="history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100"
+                          data-range-hours="168"
+                          type="button"
+                        >
+                          7d
+                        </button>
+                        <button
+                          class="history-range-btn px-3 py-1.5 text-xs rounded-xl border border-transparent text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-900/30 dark:hover:text-slate-100"
+                          data-range-hours="720"
+                          type="button"
+                        >
+                          30d
+                        </button>
+                      </div>
+
+                      <button
+                        id="history-refresh"
+                        type="button"
+                        class="hidden rounded-2xl border border-slate-200/70 bg-white px-3 py-2 text-xs text-slate-800 hover:bg-slate-50 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-200 dark:hover:bg-slate-900/30"
+                        title="Refresh aggregated history"
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-2 text-xs">
+                    <span
+                      id="history-resolution"
+                      class="inline-flex items-center rounded-full px-2.5 py-1 border border-slate-200/70 bg-white text-slate-700 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-200"
+                    >
+                      resolution: &mdash;
+                    </span>
+                    <span
+                      id="history-mode"
+                      class="inline-flex items-center rounded-full px-2.5 py-1 border border-slate-200/70 bg-white text-slate-600 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-300"
+                    >
+                      mode: &mdash;
+                    </span>
+                    <span
+                      id="history-error"
+                      class="hidden inline-flex items-center rounded-full px-2.5 py-1 border border-rose-400/30 bg-rose-500/15 text-rose-200"
+                    >
+                      Unable to load history
+                    </span>
                   </div>
                 </div>
-                <div class="mt-4 flex-1 min-h-0">
-                  <canvas id="chart-history" class="w-full h-full"></canvas>
+              </div>
+
+              <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="card p-5 h-[320px] flex flex-col">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">CPU</div>
+                      <div class="text-xs text-slate-600 dark:text-slate-400">Percent</div>
+                    </div>
+                  </div>
+                  <div class="mt-4 flex-1 min-h-0">
+                    <canvas id="chart-cpu" class="w-full h-full"></canvas>
+                  </div>
+                </div>
+
+                <div class="card p-5 h-[320px] flex flex-col">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">RAM</div>
+                      <div class="text-xs text-slate-600 dark:text-slate-400">Percent</div>
+                    </div>
+                  </div>
+                  <div class="mt-4 flex-1 min-h-0">
+                    <canvas id="chart-ram" class="w-full h-full"></canvas>
+                  </div>
+                </div>
+
+                <div class="card p-5 h-[320px] flex flex-col lg:col-span-2">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Network</div>
+                      <div class="text-xs text-slate-600 dark:text-slate-400">Throughput (bytes/sec)</div>
+                    </div>
+                  </div>
+                  <div class="mt-4 flex-1 min-h-0">
+                    <canvas id="chart-net" class="w-full h-full"></canvas>
+                  </div>
                 </div>
               </div>
 
               <div class="card p-5">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100" id="watched-ports-title">Ports</div>
-                    <div class="text-xs text-slate-400" id="watched-ports-subtitle">Watched services</div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100" id="watched-ports-title">
+                      Ports
+                    </div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400" id="watched-ports-subtitle">
+                      Watched services
+                    </div>
                   </div>
                 </div>
                 <div class="mt-4 overflow-x-auto">
-                  <table class="w-full text-sm">
-                    <thead class="text-slate-400">
-                      <tr class="border-b border-slate-800/70">
+                  <table class="w-full text-sm tabular-nums">
+                    <thead class="text-slate-600 sticky top-0 z-10 bg-white/75 backdrop-blur dark:text-slate-400 dark:bg-slate-950/40">
+                      <tr class="border-b border-slate-200/70 dark:border-slate-800/70">
                         <th class="text-left py-3 pr-3 font-medium">Port</th>
                         <th class="text-left py-3 pr-3 font-medium">Status</th>
                         <th class="text-left py-3 pr-3 font-medium">PID</th>
                         <th class="text-left py-3 font-medium">Process</th>
                       </tr>
                     </thead>
-                    <tbody id="ports-body" class="divide-y divide-slate-800/60">
+                    <tbody id="ports-body" class="divide-y divide-slate-200/70 dark:divide-slate-800/60">
                       <tr>
-                        <td colspan="4" class="py-4 text-slate-400">No data yet</td>
+                        <td colspan="4" class="py-4 text-slate-500 dark:text-slate-400">No data yet</td>
                       </tr>
                     </tbody>
                   </table>
@@ -166,31 +279,32 @@
               <div class="card p-5 max-h-[520px] flex flex-col">
                 <div class="flex items-start justify-between gap-3">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100">All Listening Ports</div>
-                    <div class="text-xs text-slate-400" id="listening-ports-meta">&mdash;</div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">All Listening Ports</div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400" id="listening-ports-meta">&mdash;</div>
                   </div>
                   <div class="w-56">
                     <input
                       id="listening-ports-search"
                       type="text"
                       placeholder="Search by process or port"
-                      class="w-full rounded-xl border border-slate-800/60 bg-slate-950/20 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                      aria-label="Search listening ports"
+                      class="w-full rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:ring-sky-500/40"
                     />
                   </div>
                 </div>
                 <div class="mt-4 overflow-auto flex-1 min-h-0">
-                  <table class="w-full text-sm">
-                    <thead class="text-slate-400">
-                      <tr class="border-b border-slate-800/70">
+                  <table class="w-full text-sm tabular-nums">
+                    <thead class="text-slate-600 sticky top-0 z-10 bg-white/75 backdrop-blur dark:text-slate-400 dark:bg-slate-950/40">
+                      <tr class="border-b border-slate-200/70 dark:border-slate-800/70">
                         <th class="text-left py-3 pr-3 font-medium">Port</th>
                         <th class="text-left py-3 pr-3 font-medium">Local IP</th>
                         <th class="text-left py-3 pr-3 font-medium">PID</th>
                         <th class="text-left py-3 font-medium">Process</th>
                       </tr>
                     </thead>
-                    <tbody id="listening-ports-body" class="divide-y divide-slate-800/60">
+                    <tbody id="listening-ports-body" class="divide-y divide-slate-200/70 dark:divide-slate-800/60">
                       <tr>
-                        <td colspan="4" class="py-4 text-slate-400">No data yet</td>
+                        <td colspan="4" class="py-4 text-slate-500 dark:text-slate-400">No data yet</td>
                       </tr>
                     </tbody>
                   </table>
@@ -202,49 +316,87 @@
               <div class="card p-5 max-h-[420px] flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100">Alerts</div>
-                    <div class="text-xs text-slate-400">Most recent</div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Alerts</div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400">Most recent</div>
                   </div>
-                  <div class="text-xs text-slate-400" id="alerts-count">&mdash;</div>
+                  <div class="text-xs text-slate-600 dark:text-slate-400" id="alerts-count">&mdash;</div>
                 </div>
                 <div id="alerts-list" class="mt-4 space-y-2 flex-1 min-h-0 overflow-auto pr-1">
-                  <div class="text-sm text-slate-400">No data yet</div>
+                  <div class="text-sm text-slate-600 dark:text-slate-400">No data yet</div>
                 </div>
               </div>
 
               <div class="card p-5 max-h-[320px] flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100">Timeline</div>
-                    <div class="text-xs text-slate-400">Key state changes</div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Timeline</div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400">Key state changes</div>
                   </div>
-                  <div class="text-xs text-slate-400" id="timeline-count">&mdash;</div>
+                  <div class="text-xs text-slate-600 dark:text-slate-400" id="timeline-count">&mdash;</div>
                 </div>
                 <div id="timeline-list" class="mt-4 space-y-2 flex-1 min-h-0 overflow-auto pr-1">
-                  <div class="text-sm text-slate-400">No data yet</div>
+                  <div class="text-sm text-slate-600 dark:text-slate-400">No data yet</div>
+                </div>
+              </div>
+
+              <div class="card p-5 max-h-[360px] flex flex-col">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Docker</div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400" id="docker-meta">&mdash;</div>
+                  </div>
+                  <div class="w-48">
+                    <input
+                      id="docker-search"
+                      type="text"
+                      placeholder="Search containers"
+                      aria-label="Search Docker containers"
+                      class="w-full rounded-xl border border-slate-200/70 bg-white px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:border-slate-800/60 dark:bg-slate-950/20 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:ring-sky-500/40"
+                    />
+                  </div>
+                </div>
+                <div class="mt-4 overflow-auto flex-1 min-h-0">
+                  <table class="w-full text-sm tabular-nums">
+                    <thead class="text-slate-600 sticky top-0 z-10 bg-white/75 backdrop-blur dark:text-slate-400 dark:bg-slate-950/40">
+                      <tr class="border-b border-slate-200/70 dark:border-slate-800/70">
+                        <th class="text-left py-3 pr-3 font-medium">Name</th>
+                        <th class="text-left py-3 pr-3 font-medium">Status</th>
+                        <th class="text-left py-3 pr-3 font-medium">CPU%</th>
+                        <th class="text-left py-3 pr-3 font-medium">RAM%</th>
+                        <th class="text-left py-3 pr-3 font-medium">RAM Used</th>
+                        <th class="text-left py-3 pr-3 font-medium">Ports</th>
+                        <th class="text-left py-3 font-medium">Restarts</th>
+                      </tr>
+                    </thead>
+                    <tbody id="docker-body" class="divide-y divide-slate-200/70 dark:divide-slate-800/60">
+                      <tr>
+                        <td colspan="7" class="py-4 text-slate-500 dark:text-slate-400">No data yet</td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
               <div class="card p-5 max-h-[260px] flex flex-col">
                 <div class="flex items-center justify-between">
                   <div>
-                    <div class="text-sm font-semibold text-slate-100">Top Processes</div>
-                    <div class="text-xs text-slate-400" id="processes-status">&mdash;</div>
+                    <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Top Processes</div>
+                    <div class="text-xs text-slate-600 dark:text-slate-400" id="processes-status">&mdash;</div>
                   </div>
                 </div>
                 <div class="mt-4 overflow-auto flex-1 min-h-0">
-                  <table class="w-full text-sm">
-                    <thead class="text-slate-400">
-                      <tr class="border-b border-slate-800/70">
+                  <table class="w-full text-sm tabular-nums">
+                    <thead class="text-slate-600 sticky top-0 z-10 bg-white/75 backdrop-blur dark:text-slate-400 dark:bg-slate-950/40">
+                      <tr class="border-b border-slate-200/70 dark:border-slate-800/70">
                         <th class="text-left py-3 pr-3 font-medium">Name</th>
                         <th class="text-left py-3 pr-3 font-medium">PID</th>
                         <th class="text-left py-3 pr-3 font-medium">CPU%</th>
                         <th class="text-left py-3 font-medium">RAM</th>
                       </tr>
                     </thead>
-                    <tbody id="processes-body" class="divide-y divide-slate-800/60">
+                    <tbody id="processes-body" class="divide-y divide-slate-200/70 dark:divide-slate-800/60">
                       <tr>
-                        <td colspan="4" class="py-4 text-slate-400">No data yet</td>
+                        <td colspan="4" class="py-4 text-slate-500 dark:text-slate-400">No data yet</td>
                       </tr>
                     </tbody>
                   </table>
@@ -253,7 +405,7 @@
             </div>
           </div>
 
-          <footer class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-400">
+          <footer class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400">
             <div>
               Last updated: <span id="last-updated">&mdash;</span>
             </div>
