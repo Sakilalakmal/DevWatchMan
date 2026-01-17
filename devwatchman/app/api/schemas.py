@@ -56,6 +56,23 @@ class PortsResponse(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
+class ListeningPortItem(BaseModel):
+    local_ip: str
+    port: int
+    pid: int
+    process_name: str
+
+
+class ListeningPortsData(BaseModel):
+    items: list[ListeningPortItem] = Field(default_factory=list)
+
+
+class ListeningPortsResponse(BaseModel):
+    ok: bool
+    data: ListeningPortsData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
 class NetworkData(BaseModel):
     host: str
     timeout_ms: int
@@ -124,4 +141,24 @@ class ProcessesData(BaseModel):
 class ProcessesResponse(BaseModel):
     ok: bool
     data: ProcessesData | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class TimelineEvent(BaseModel):
+    id: int
+    ts_utc: str
+    kind: str
+    message: str
+    severity: str
+    meta_json: str | None = None
+    meta: dict[str, Any] | None = None
+
+
+class TimelineData(BaseModel):
+    items: list[TimelineEvent] = Field(default_factory=list)
+
+
+class TimelineResponse(BaseModel):
+    ok: bool
+    data: TimelineData | None = None
     meta: dict[str, Any] = Field(default_factory=dict)

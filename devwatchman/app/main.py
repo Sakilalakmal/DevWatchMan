@@ -18,6 +18,7 @@ from app.services.ws_manager import WebSocketManager
 from app.storage.db import init_db
 from app.storage.db import get_connection
 from app.storage.alerts import get_alert_setting
+from app.storage.events import insert_event
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -63,12 +64,42 @@ async def ws_live(ws: WebSocket) -> None:
 @app.on_event("startup")
 async def on_startup() -> None:
     init_db()
+    from datetime import datetime, timezone
+
+    ts_utc = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
+        try:
+            event_id = insert_event(
+                conn,
+                {
+                    "ts_utc": ts_utc,
+                    "kind": "app_started",
+                    "message": f"{APP_NAME} started",
+                    "severity": "info",
+                },
+            )
+            try:
+                await app.state.ws_manager.broadcast_json(
+                    {
+                        "type": "timeline_event",
+                        "v": 1,
+                        "ts_utc": ts_utc,
+                        "data": {
+                            "id": event_id,
+                            "kind": "app_started",
+                            "severity": "info",
+                            "message": f"{APP_NAME} started",
+                        },
+                    }
+                )
+            except Exception:
+                pass
+        except Exception:
+            logger.exception("Failed to insert app_started event")
+
         mute_until = get_alert_setting(conn, "mute_until_utc")
     if mute_until:
         try:
-            from datetime import datetime, timezone
-
             dt = datetime.fromisoformat(mute_until)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)

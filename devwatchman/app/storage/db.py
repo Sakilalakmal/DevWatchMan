@@ -97,6 +97,20 @@ def init_db() -> None:
             )
             """
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_utc TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                message TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                meta_json TEXT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_events_ts_utc ON events(ts_utc)")
         conn.commit()
 
     logger.info("SQLite initialized at %s", DB_PATH)

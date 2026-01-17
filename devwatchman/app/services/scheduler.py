@@ -25,8 +25,10 @@ from app.core.config import FLAP_THRESHOLD, FLAP_WINDOW_SECONDS
 from app.core.config import NETWORK_PING_HOST
 from app.core.config import NETWORK_PING_TIMEOUT_MS
 from app.core.config import SNAPSHOT_INTERVAL_SECONDS
+from app.core.config import WATCH_PORTS
 from app.storage.db import get_connection
 from app.storage.alerts import insert_alert
+from app.storage.events import insert_event
 from app.storage.snapshots import insert_snapshot
 from app.services.alert_state import AlertState
 from app.services.ws_manager import WebSocketManager
@@ -48,6 +50,7 @@ class SnapshotScheduler:
         self._ws_manager = ws_manager
         self._alert_state = alert_state
         self._last_processes_broadcast_mono: float = 0.0
+        self._last_listening_ports_broadcast_mono: float = 0.0
         self._cpu_high_since_mono: float | None = None
         self._cpu_high_fired: bool = False
         self._ram_high_since_mono: float | None = None
@@ -59,6 +62,9 @@ class SnapshotScheduler:
         self._port_down_active: set[int] = set()
         self._port_flap_times: dict[int, deque[float]] = {}
         self._port_flapping_active: set[int] = set()
+        self._watch_port_last_state: dict[int, bool] = {}
+        self._watch_port_last_info: dict[int, dict[str, Any]] = {}
+        self._last_net_quality: str | None = None
 
     def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -102,7 +108,7 @@ class SnapshotScheduler:
             mute_until = mute_until.replace(tzinfo=timezone.utc)
         return bool(mute_until and now_utc < mute_until)
 
-    def _emit_alert(
+    async def _emit_alert(
         self,
         ts_utc: str,
         now_utc: datetime,
@@ -123,7 +129,35 @@ class SnapshotScheduler:
                     conn,
                     {"ts_utc": ts_utc, "type": type, "message": message, "severity": severity},
                 )
+                event_id: int | None = None
+                try:
+                    event_id = insert_event(
+                        conn,
+                        {
+                            "ts_utc": ts_utc,
+                            "kind": "alert_created",
+                            "message": message,
+                            "severity": severity,
+                            "meta": {"alert_id": alert_id, "type": type, "key": key},
+                        },
+                    )
+                except Exception:
+                    logger.exception("Failed to insert timeline event for alert type=%s", type)
             self._last_alert_sent[(type, key)] = now_monotonic
+            if event_id is not None:
+                await self._broadcast(
+                    {
+                        "type": "timeline_event",
+                        "v": 1,
+                        "ts_utc": ts_utc,
+                        "data": {
+                            "id": event_id,
+                            "kind": "alert_created",
+                            "severity": severity,
+                            "message": message,
+                        },
+                    }
+                )
             return {
                 "id": alert_id,
                 "ts_utc": ts_utc,
@@ -147,13 +181,119 @@ class SnapshotScheduler:
             disk = self._safe_collect("disk", collect_disk) or {}
             net = self._safe_collect("network", collect_network) or {}
 
-            ports_required_statuses = self._safe_collect(
-                "ports_required", lambda: get_port_status(ALERT_PORTS_REQUIRED)
+            ports_watch_statuses = self._safe_collect(
+                "ports_watch", lambda: get_port_status(WATCH_PORTS)
             ) or []
             latency_ms = await asyncio.to_thread(
                 ping_latency_ms, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
             )
             net_quality = classify_network(latency_ms)
+
+            port_info: dict[int, dict[str, Any]] = {}
+            for item in ports_watch_statuses:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    port_val = int(item.get("port"))
+                except Exception:
+                    continue
+                port_info[port_val] = item
+
+            events_to_insert: list[dict[str, Any]] = []
+
+            for port in WATCH_PORTS:
+                item = port_info.get(
+                    port,
+                    {"port": port, "listening": False, "pid": None, "process_name": None},
+                )
+                current = bool(item.get("listening"))
+                previous = self._watch_port_last_state.get(port)
+                if previous is None:
+                    self._watch_port_last_state[port] = current
+                    self._watch_port_last_info[port] = item
+                    continue
+                if previous == current:
+                    continue
+
+                self._watch_port_last_state[port] = current
+                self._watch_port_last_info[port] = item
+
+                if current:
+                    pid = item.get("pid")
+                    process_name = item.get("process_name")
+                    details: list[str] = []
+                    if pid:
+                        details.append(f"PID {pid}")
+                    if process_name:
+                        details.append(str(process_name))
+                    suffix = f" ({' '.join(details)})" if details else ""
+                    events_to_insert.append(
+                        {
+                            "ts_utc": ts_utc,
+                            "kind": "port_up",
+                            "message": f"Port {port} UP{suffix}",
+                            "severity": "info",
+                            "meta": {
+                                "port": port,
+                                "pid": pid,
+                                "process_name": process_name,
+                            },
+                        }
+                    )
+                else:
+                    events_to_insert.append(
+                        {
+                            "ts_utc": ts_utc,
+                            "kind": "port_down",
+                            "message": f"Port {port} DOWN",
+                            "severity": "critical" if port in ALERT_PORTS_REQUIRED else "warning",
+                            "meta": {"port": port},
+                        }
+                    )
+
+            if self._last_net_quality is None:
+                self._last_net_quality = net_quality
+            elif self._last_net_quality != net_quality:
+                prev = self._last_net_quality
+                self._last_net_quality = net_quality
+                latency_str = "N/A" if latency_ms is None else f"{latency_ms:.0f}ms"
+                severity = (
+                    "critical"
+                    if net_quality == "offline"
+                    else "warning"
+                    if net_quality == "poor"
+                    else "info"
+                )
+                events_to_insert.append(
+                    {
+                        "ts_utc": ts_utc,
+                        "kind": "network_status",
+                        "message": f"Network status changed: {prev} -> {net_quality} (latency {latency_str})",
+                        "severity": severity,
+                        "meta": {"prev": prev, "status": net_quality, "latency_ms": latency_ms},
+                    }
+                )
+
+            if events_to_insert:
+                try:
+                    with get_connection() as conn:
+                        for ev in events_to_insert:
+                            event_id = insert_event(conn, ev)
+                            await self._broadcast(
+                                {
+                                    "type": "timeline_event",
+                                    "v": 1,
+                                    "ts_utc": ts_utc,
+                                    "data": {
+                                        "id": event_id,
+                                        "kind": ev["kind"],
+                                        "severity": ev["severity"],
+                                        "message": ev["message"],
+                                    },
+                                }
+                            )
+                except Exception:
+                    logger.exception("Failed to insert timeline events")
 
             snapshot: dict[str, Any] = {
                 "ts_utc": ts_utc,
@@ -214,15 +354,10 @@ class SnapshotScheduler:
 
             alerts_inserted = 0
 
-            port_state: dict[int, bool] = {}
-            for item in ports_required_statuses:
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    port = int(item.get("port"))
-                except Exception:
-                    continue
-                port_state[port] = bool(item.get("listening"))
+            port_state: dict[int, bool] = {
+                port: bool(port_info.get(port, {}).get("listening"))
+                for port in ALERT_PORTS_REQUIRED
+            }
 
             for port in ALERT_PORTS_REQUIRED:
                 current = port_state.get(port, False)
@@ -246,7 +381,7 @@ class SnapshotScheduler:
                             elif not self._can_send_alert("port_flapping", str(port), now_mono):
                                 self._port_flapping_active.add(port)
                             else:
-                                alert = self._emit_alert(
+                                alert = await self._emit_alert(
                                     ts_utc,
                                     now_utc_dt,
                                     now_mono,
@@ -273,7 +408,7 @@ class SnapshotScheduler:
                         elif not self._can_send_alert("port_down", str(port), now_mono):
                             self._port_down_active.add(port)
                         else:
-                            alert = self._emit_alert(
+                            alert = await self._emit_alert(
                                 ts_utc,
                                 now_utc_dt,
                                 now_mono,
@@ -310,6 +445,27 @@ class SnapshotScheduler:
                 except Exception:
                     logger.exception("Failed to broadcast processes")
 
+            if (
+                self._ws_manager is not None
+                and await self._ws_manager.has_connections()
+                and (now_mono - self._last_listening_ports_broadcast_mono) >= 5.0
+            ):
+                self._last_listening_ports_broadcast_mono = now_mono
+                try:
+                    from app.collectors.listening_ports import get_listening_ports
+
+                    items = await asyncio.to_thread(get_listening_ports, 2000)
+                    await self._broadcast(
+                        {
+                            "type": "listening_ports",
+                            "v": 1,
+                            "ts_utc": ts_utc,
+                            "data": {"items": items},
+                        }
+                    )
+                except Exception:
+                    logger.exception("Failed to broadcast listening_ports")
+
             cpu_percent = float(snapshot.get("cpu_percent") or 0.0)
             if cpu_percent >= ALERT_CPU_PERCENT:
                 if self._cpu_high_since_mono is None:
@@ -319,7 +475,7 @@ class SnapshotScheduler:
                     and self._cpu_high_since_mono is not None
                     and (now_mono - self._cpu_high_since_mono) >= float(ALERT_CPU_DURATION_SECONDS)
                 ):
-                    alert = self._emit_alert(
+                    alert = await self._emit_alert(
                         ts_utc,
                         now_utc_dt,
                         now_mono,
@@ -351,7 +507,7 @@ class SnapshotScheduler:
                     and self._ram_high_since_mono is not None
                     and (now_mono - self._ram_high_since_mono) >= float(ALERT_RAM_DURATION_SECONDS)
                 ):
-                    alert = self._emit_alert(
+                    alert = await self._emit_alert(
                         ts_utc,
                         now_utc_dt,
                         now_mono,
@@ -383,7 +539,7 @@ class SnapshotScheduler:
                     and (now_mono - self._net_offline_since_mono)
                     >= float(ALERT_NET_OFFLINE_SECONDS)
                 ):
-                    alert = self._emit_alert(
+                    alert = await self._emit_alert(
                         ts_utc,
                         now_utc_dt,
                         now_mono,
@@ -409,7 +565,7 @@ class SnapshotScheduler:
             if net_quality == "poor":
                 if not self._net_poor_fired:
                     latency_str = "N/A" if latency_ms is None else f"{latency_ms:.0f}ms"
-                    alert = self._emit_alert(
+                    alert = await self._emit_alert(
                         ts_utc,
                         now_utc_dt,
                         now_mono,

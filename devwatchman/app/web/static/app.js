@@ -6,7 +6,14 @@ const state = {
   chart: null,
   chartTsMs: [],
   alerts: [],
+  timeline: [],
   processes: [],
+  listeningPorts: {
+    items: [],
+    query: "",
+    wsSeen: false,
+    tsUtc: null,
+  },
   ws: {
     connected: false,
     disconnectedSinceMs: null,
@@ -26,6 +33,11 @@ function setText(id, value) {
   const el = $(id);
   if (!el) return;
   el.textContent = value;
+}
+
+function escapeHtml(value) {
+  const s = String(value ?? "");
+  return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
 function formatNumber(value, digits = 1) {
@@ -210,6 +222,78 @@ function handlePorts(json) {
   tbody.innerHTML = rows || `<tr><td colspan="4" class="py-4 text-slate-400">${NA}</td></tr>`;
 }
 
+function filterListeningPorts(items, query) {
+  if (!query) return items;
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((p) => {
+    const port = p?.port != null ? String(p.port) : "";
+    const pid = p?.pid != null ? String(p.pid) : "";
+    const ip = (p?.local_ip ?? "").toLowerCase();
+    const name = (p?.process_name ?? "").toLowerCase();
+    return port.includes(q) || pid.includes(q) || ip.includes(q) || name.includes(q);
+  });
+}
+
+function renderListeningPorts(items) {
+  const tbody = $("listening-ports-body");
+  const meta = $("listening-ports-meta");
+  if (!tbody) return;
+
+  if (!Array.isArray(items)) {
+    if (meta) meta.textContent = NA;
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">Unable to load</td></tr>`;
+    return;
+  }
+
+  const query = state.listeningPorts.query;
+  const filtered = filterListeningPorts(items, query);
+  const maxRows = 500;
+  const show = filtered.slice(0, maxRows);
+  const truncated = filtered.length > maxRows;
+  const mode = state.ws.connected && state.listeningPorts.wsSeen ? "Live" : "Fallback";
+
+  if (meta) {
+    const bits = [`${mode} · ${filtered.length} shown`];
+    if (query.trim()) bits.push(`filter: "${query.trim()}"`);
+    if (truncated) bits.push("Showing first 500");
+    meta.textContent = bits.join(" · ");
+  }
+
+  if (show.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" class="py-4 text-slate-400">No matches</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = show
+    .map((p) => {
+      const port = p?.port ?? NA;
+      const localIp = escapeHtml(p?.local_ip ?? NA);
+      const pid = p?.pid ?? NA;
+      const name = escapeHtml(p?.process_name ?? NA);
+      return `
+        <tr class="hover:bg-slate-900/20">
+          <td class="py-3 pr-3 text-slate-100">${port}</td>
+          <td class="py-3 pr-3 text-slate-200">${localIp}</td>
+          <td class="py-3 pr-3 text-slate-200">${pid}</td>
+          <td class="py-3 text-slate-200 truncate max-w-[18rem]" title="${name}">${name}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function handleListeningPorts(json) {
+  const items = json?.ok ? json?.data?.items : null;
+  if (!Array.isArray(items)) {
+    renderListeningPorts(null);
+    return;
+  }
+  state.listeningPorts.items = items;
+  state.listeningPorts.tsUtc = json?.meta?.ts_utc ?? null;
+  renderListeningPorts(state.listeningPorts.items);
+}
+
 function renderAlerts(alerts) {
   const list = $("alerts-list");
   const count = $("alerts-count");
@@ -241,6 +325,42 @@ function renderAlerts(alerts) {
           </div>
           <div class="mt-2 text-sm text-slate-100">${a.message ?? NA}</div>
           <div class="mt-1 text-xs text-slate-400">${a.type ?? ""}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderTimeline(items) {
+  const list = $("timeline-list");
+  const count = $("timeline-count");
+  if (!list) return;
+
+  if (!Array.isArray(items)) {
+    if (count) count.textContent = NA;
+    list.innerHTML = `<div class="text-sm text-slate-400">${NA}</div>`;
+    return;
+  }
+
+  if (count) count.textContent = `${items.length}`;
+  if (items.length === 0) {
+    list.innerHTML = `<div class="text-sm text-slate-400">No events</div>`;
+    return;
+  }
+
+  list.innerHTML = items
+    .map((e) => {
+      const sev = e.severity ?? "info";
+      const ts = e.ts_utc ? new Date(e.ts_utc).toLocaleTimeString() : NA;
+      return `
+        <div class="rounded-2xl border border-slate-800/60 bg-slate-950/20 p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs text-slate-400">${ts}</div>
+            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs border ${badgeClass(sev)}">
+              ${sev}
+            </span>
+          </div>
+          <div class="mt-2 text-sm text-slate-100">${e.message ?? NA}</div>
         </div>
       `;
     })
@@ -414,7 +534,7 @@ function stopFallback(summaryPoller, alertsPoller, networkPoller, processesPolle
   processesPoller.stop();
 }
 
-function connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }) {
+function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts }) {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${scheme}://${window.location.host}/ws/live`;
 
@@ -449,7 +569,9 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }) {
     if (msg.type === "kpi") onKpi(msg);
     if (msg.type === "chart_point") onChartPoint(msg);
     if (msg.type === "alert") onAlert(msg);
+    if (msg.type === "timeline_event") onTimelineEvent(msg);
     if (msg.type === "processes") onProcesses(msg);
+    if (msg.type === "listening_ports" && onListeningPorts) onListeningPorts(msg);
   });
 
   const onDisconnect = () => {
@@ -461,7 +583,10 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }) {
 
     const delay = state.ws.reconnectDelayMs;
     state.ws.reconnectDelayMs = Math.min(state.ws.reconnectDelayMs * 2, 10000);
-    window.setTimeout(() => connectWebSocket({ onKpi, onChartPoint, onAlert, onProcesses }), delay);
+    window.setTimeout(
+      () => connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onProcesses, onListeningPorts }),
+      delay,
+    );
   };
 
   ws.addEventListener("close", onDisconnect);
@@ -473,6 +598,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   const portsPoller = makePoller("/api/ports", 3000, handlePorts);
   portsPoller.start();
+
+  const listeningPortsPoller = makePoller("/api/ports/listening?limit=2000", 5000, handleListeningPorts);
+  listeningPortsPoller.start();
 
   const summaryPoller = makePoller("/api/summary", 2000, (json) => {
     if (!json || !json.ok || !json.data) {
@@ -543,6 +671,18 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   try {
     const controller = new AbortController();
+    const timeline = await fetchJson("/api/timeline/latest?limit=20", controller);
+    const items = timeline?.ok ? timeline?.data?.items : null;
+    if (Array.isArray(items)) {
+      state.timeline = items.slice(0, 20);
+      renderTimeline(state.timeline);
+    }
+  } catch (_) {
+    // ignore
+  }
+
+  try {
+    const controller = new AbortController();
     const network = await fetchJson("/api/network", controller);
     if (network && network.ok && network.data) {
       renderNetworkQuality(network.data);
@@ -590,6 +730,20 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderAlerts(state.alerts);
       updateLastUpdated();
     },
+    onTimelineEvent: (msg) => {
+      const e = msg.data || null;
+      if (!e) return;
+      const item = {
+        id: e.id,
+        ts_utc: msg.ts_utc,
+        kind: e.kind,
+        severity: e.severity,
+        message: e.message,
+      };
+      state.timeline = [item, ...state.timeline.filter((x) => x.id !== item.id)].slice(0, 20);
+      renderTimeline(state.timeline);
+      updateLastUpdated();
+    },
     onProcesses: (msg) => {
       const items = msg?.data?.items;
       if (!Array.isArray(items)) {
@@ -600,13 +754,36 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderProcesses(state.processes);
       updateLastUpdated();
     },
+    onListeningPorts: (msg) => {
+      const items = msg?.data?.items;
+      if (!Array.isArray(items)) {
+        renderListeningPorts(null);
+        return;
+      }
+      state.listeningPorts.wsSeen = true;
+      state.listeningPorts.items = items;
+      state.listeningPorts.tsUtc = msg?.ts_utc ?? null;
+      renderListeningPorts(state.listeningPorts.items);
+      updateLastUpdated();
+    },
   });
+
+  const search = $("listening-ports-search");
+  if (search) {
+    search.addEventListener("input", () => {
+      state.listeningPorts.query = search.value ?? "";
+      renderListeningPorts(state.listeningPorts.items);
+    });
+  }
 
   window.setInterval(() => {
     if (state.ws.connected) {
       stopFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);
+      if (state.listeningPorts.wsSeen) listeningPortsPoller.stop();
       return;
     }
+
+    listeningPortsPoller.start();
     const since = state.ws.disconnectedSinceMs;
     if (since != null && Date.now() - since > 10000) {
       startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller);
