@@ -66,6 +66,32 @@ def init_db() -> None:
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS snapshots_1m (
+                bucket_start_utc TEXT PRIMARY KEY,
+                avg_cpu_percent REAL,
+                avg_mem_percent REAL,
+                avg_disk_percent REAL,
+                avg_net_sent_bps REAL,
+                avg_net_recv_bps REAL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS snapshots_15m (
+                bucket_start_utc TEXT PRIMARY KEY,
+                avg_cpu_percent REAL,
+                avg_mem_percent REAL,
+                avg_disk_percent REAL,
+                avg_net_sent_bps REAL,
+                avg_net_recv_bps REAL
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS alerts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 ts_utc TEXT NOT NULL,

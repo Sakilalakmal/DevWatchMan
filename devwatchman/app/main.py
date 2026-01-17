@@ -16,6 +16,7 @@ from app.core.profiles import get_active_profile_name, resolve_profile, set_acti
 from app.services.alert_state import AlertState
 from app.services.profile_state import ProfileState
 from app.services.scheduler import SnapshotScheduler
+from app.services.retention import RetentionService
 from app.services.ws_manager import WebSocketManager
 from app.storage.db import init_db
 from app.storage.db import get_connection
@@ -126,6 +127,10 @@ async def on_startup() -> None:
     )
     scheduler.start()
     app.state.scheduler = scheduler
+
+    retention = RetentionService(interval_seconds=60)
+    retention.start()
+    app.state.retention = retention
     logger.info("%s started", APP_NAME)
 
 
@@ -134,6 +139,9 @@ async def on_shutdown() -> None:
     scheduler: SnapshotScheduler | None = getattr(app.state, "scheduler", None)
     if scheduler is not None:
         await scheduler.stop()
+    retention: RetentionService | None = getattr(app.state, "retention", None)
+    if retention is not None:
+        await retention.stop()
     manager: WebSocketManager | None = getattr(app.state, "ws_manager", None)
     if manager is not None:
         await manager.close_all()

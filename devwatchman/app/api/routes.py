@@ -21,6 +21,7 @@ from app.storage.alerts import acknowledge_alert, get_recent_alerts, set_alert_s
 from app.storage.db import get_connection
 from app.storage.events import get_events, get_latest_events, insert_event
 from app.storage.snapshots import get_latest_snapshot, get_snapshot_history
+from app.storage.snapshots import get_snapshot_history_15m, get_snapshot_history_1m
 
 router = APIRouter(prefix="/api")
 
@@ -43,19 +44,47 @@ def summary() -> SnapshotResponse:
 
 @router.get("/history")
 def history(
-    hours: int = Query(default=HISTORY_DEFAULT_HOURS, ge=1, le=168),
+    hours: int = Query(default=HISTORY_DEFAULT_HOURS, ge=1, le=720),
 ) -> HistoryResponse:
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     since_ts_utc = since.isoformat()
 
     with get_connection() as conn:
-        rows = get_snapshot_history(conn, since_ts_utc=since_ts_utc)
+        if hours <= 24:
+            resolution = "raw"
+            rows = get_snapshot_history(conn, since_ts_utc=since_ts_utc)
+        elif hours <= 168:
+            resolution = "1m"
+            rows = get_snapshot_history_1m(conn, since_ts_utc=since_ts_utc)
+        else:
+            resolution = "15m"
+            rows = get_snapshot_history_15m(conn, since_ts_utc=since_ts_utc)
 
     return HistoryResponse(
         ok=True,
         data=rows,
-        meta={"hours": hours, "since_ts_utc": since_ts_utc, "count": len(rows)},
+        meta={
+            "hours": hours,
+            "since_ts_utc": since_ts_utc,
+            "count": len(rows),
+            "points": len(rows),
+            "resolution": resolution,
+        },
     )
+
+
+@router.get("/history/meta")
+def history_meta() -> dict:
+    return {
+        "ok": True,
+        "data": {
+            "raw_retention_hours": 24,
+            "rollup_1m_days": 7,
+            "rollup_15m_days": 30,
+            "supported_ranges": [1, 6, 24, 168, 720],
+        },
+        "meta": {},
+    }
 
 
 @router.get("/timeline")
