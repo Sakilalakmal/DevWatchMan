@@ -2,8 +2,6 @@
 
 # 🔍 DevWatchMan
 
-![DevWatchMan Banner](https://img.shields.io/badge/DevWatchMan-System_Monitor-2563EB? style=for-the-badge)
-
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB? style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](https://www.sqlite.org/)
