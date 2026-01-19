@@ -1,24 +1,31 @@
 from __future__ import annotations
 
+import argparse
+import asyncio
 import os
 import signal
 import socket
 import sys
+import traceback
 from pathlib import Path
 
 import uvicorn
 
 
-def _pick_free_port(host: str, start: int = 8000, end: int = 8010) -> int:
-    for port in range(start, end + 1):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind((host, port))
-            except OSError:
-                continue
-            return port
-    raise RuntimeError(f"No free port available in range {start}-{end}")
+def _bind_listen_socket(host: str, port: int) -> tuple[socket.socket, int]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+        sock.listen(2048)
+        chosen_port = int(sock.getsockname()[1])
+        return sock, chosen_port
+    except Exception:
+        try:
+            sock.close()
+        finally:
+            pass
+        raise
 
 
 def _resolve_db_path() -> Path:
@@ -32,12 +39,27 @@ def _resolve_db_path() -> Path:
     return db_dir / "devwatchman.db"
 
 
-def main() -> None:
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="devwatchman-backend", add_help=True)
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=0,
+        help="Port to bind on 127.0.0.1. Use 0 to choose a free port (recommended).",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _parse_args(list(sys.argv[1:] if argv is None else argv))
     host = "127.0.0.1"
-    port = _pick_free_port(host)
+    if args.port < 0 or args.port > 65535:
+        raise ValueError("--port must be in range 0..65535")
+
+    listen_sock, chosen_port = _bind_listen_socket(host, int(args.port))
 
     # Must be the FIRST stdout line.
-    print(f"DEVWATCHMAN_PORT={port}", flush=True)
+    print(f"DEVWATCHMAN_PORT={chosen_port}", flush=True)
 
     # Ensure backend source is importable.
     backend_root = Path(__file__).resolve().parent / "devwatchman"
@@ -62,7 +84,7 @@ def main() -> None:
     config = uvicorn.Config(
         fastapi_app,
         host=host,
-        port=port,
+        port=chosen_port,
         log_level="info",
         access_log=False,
     )
@@ -74,8 +96,20 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_term)
     signal.signal(signal.SIGINT, _handle_term)
 
-    server.run()
+    try:
+        asyncio.run(server.serve(sockets=[listen_sock]))
+    finally:
+        try:
+            listen_sock.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        raise
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        raise SystemExit(1)

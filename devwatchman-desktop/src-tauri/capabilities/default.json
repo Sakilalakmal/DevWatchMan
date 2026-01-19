@@ -10,9 +10,27 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
+          "name": "devwatchman-backend",
+          "cmd": "devwatchman-backend",
+          "args": [],
+          "sidecar": true
+        },
+        {
+          "name": "devwatchman-backend",
+          "cmd": "devwatchman-backend",
+          "args": ["--port", "0"],
+          "sidecar": true
+        },
+        {
           "name": "binaries/devwatchman-backend",
           "cmd": "binaries/devwatchman-backend",
           "args": [],
+          "sidecar": true
+        },
+        {
+          "name": "binaries/devwatchman-backend",
+          "cmd": "binaries/devwatchman-backend",
+          "args": ["--port", "0"],
           "sidecar": true
         }
       ]

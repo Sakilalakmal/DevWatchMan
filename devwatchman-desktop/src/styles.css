@@ -67,6 +67,29 @@ body {
   font-size: 12px;
 }
 
+.btn {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(15, 23, 42, 0.55);
+  color: #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  width: fit-content;
+  margin: 2px auto 0;
+}
+
+.btn:hover {
+  border-color: rgba(56, 189, 248, 0.5);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .spinner {
   width: 20px;
   height: 20px;

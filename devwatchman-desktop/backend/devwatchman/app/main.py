@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +28,17 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title=APP_NAME)
+
+# Allow the Tauri WebView (tauri://localhost) to call the local API endpoints
+# like /api/health during startup. This is safe here because the server binds
+# to 127.0.0.1 only and isn't exposed to the network.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(api_router)
 app.state.ws_manager = WebSocketManager()
 app.state.alert_state = AlertState()

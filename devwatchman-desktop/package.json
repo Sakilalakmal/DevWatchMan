@@ -1,10 +1,11 @@
 {
   "name": "devwatchman-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "build:backend": "..\\\\.venv\\\\Scripts\\\\python.exe -m PyInstaller --noconfirm --clean backend/build/spec/devwatchman-backend-x86_64-pc-windows-msvc.spec --distpath src-tauri/binaries --workpath backend/build/work",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "gen:icons": "tauri icon ./assets/icon-source.png",

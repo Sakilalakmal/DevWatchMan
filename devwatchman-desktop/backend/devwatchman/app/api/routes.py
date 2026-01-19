@@ -53,8 +53,8 @@ router = APIRouter(prefix="/api")
 
 
 @router.get("/health")
-def health() -> HealthResponse:
-    return HealthResponse(ok=True, data={"status": "ok"}, meta={})
+def health() -> dict[str, bool]:
+    return {"ok": True}
 
 
 @router.get("/summary")
