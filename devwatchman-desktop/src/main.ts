@@ -1,8 +1,11 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Command, type Child } from "@tauri-apps/plugin-shell";
 
+import logoUrl from "./assets/devwatchman-logo.png";
+
 type StatusEls = {
   card: HTMLElement;
+  logo: HTMLImageElement;
   title: HTMLElement;
   subtitle: HTMLElement;
   details: HTMLElement;
@@ -12,17 +15,26 @@ type StatusEls = {
 
 function getEls(): StatusEls {
   const card = document.getElementById("status-card");
+  const logo = document.getElementById("brand-logo");
   const title = document.getElementById("status-title");
   const subtitle = document.getElementById("status-subtitle");
   const details = document.getElementById("status-details");
   const frame = document.getElementById("frame");
   const iframe = document.getElementById("dashboard");
 
-  if (!card || !title || !subtitle || !details || !frame || !(iframe instanceof HTMLIFrameElement)) {
+  if (
+    !card ||
+    !(logo instanceof HTMLImageElement) ||
+    !title ||
+    !subtitle ||
+    !details ||
+    !frame ||
+    !(iframe instanceof HTMLIFrameElement)
+  ) {
     throw new Error("UI elements missing (index.html mismatch)");
   }
 
-  return { card, title, subtitle, details, frame, iframe };
+  return { card, logo, title, subtitle, details, frame, iframe };
 }
 
 function setStatus(els: StatusEls, title: string, subtitle: string, details?: string): void {
@@ -53,7 +65,7 @@ async function startBackend(els: StatusEls): Promise<{ child: Child; port: numbe
 {
   setStatus(els, "Starting DevWatchMan…", "Launching local backend");
 
-  const command = Command.sidecar("devwatchman-backend");
+  const command = Command.sidecar("binaries/devwatchman-backend");
 
   let resolvePort: ((port: number) => void) | undefined;
   let rejectPort: ((err: Error) => void) | undefined;
@@ -117,6 +129,9 @@ async function startBackend(els: StatusEls): Promise<{ child: Child; port: numbe
 window.addEventListener("DOMContentLoaded", async () => {
   const els = getEls();
   let child: Child | null = null;
+
+  els.logo.src = logoUrl;
+  requestAnimationFrame(() => els.logo.classList.add("is-visible"));
 
   try {
     const started = await startBackend(els);

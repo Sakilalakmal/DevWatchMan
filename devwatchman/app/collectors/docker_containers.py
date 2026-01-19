@@ -3,6 +3,36 @@ from __future__ import annotations
 from typing import Any
 
 
+def _humanize_docker_error(err: Exception) -> str:
+    msg = (str(err) or "").strip()
+    lower = msg.lower()
+
+    # Windows Docker Desktop / named pipe missing
+    if "createfile" in lower and "the system cannot find the file specified" in lower:
+        return "Docker engine not running (start Docker Desktop)"
+    if "docker_engine" in lower and ("file not found" in lower or "cannot find" in lower):
+        return "Docker engine not running (start Docker Desktop)"
+    if "is the docker daemon running" in lower:
+        return "Docker engine not running (start Docker Desktop)"
+
+    # Permissions / access
+    if "access is denied" in lower or "permission" in lower:
+        return "Docker not accessible (permission denied)"
+
+    # Timeouts / networking
+    if "timed out" in lower or "timeout" in lower:
+        return "Docker engine not responding (timeout)"
+
+    if not msg:
+        return "docker unavailable"
+
+    # Keep UI readable: one line, bounded length
+    first_line = msg.splitlines()[0].strip()
+    if len(first_line) > 180:
+        return first_line[:177] + "..."
+    return first_line
+
+
 def _get_docker():
     try:
         import docker  # type: ignore
@@ -22,7 +52,7 @@ def docker_available() -> tuple[bool, str]:
         client.ping()
         return True, "ok"
     except Exception as e:
-        return False, str(e) or "docker unavailable"
+        return False, _humanize_docker_error(e)
 
 
 def _safe_iso(value: Any) -> str | None:

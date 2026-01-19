@@ -29,6 +29,21 @@ body {
   padding: 24px;
 }
 
+.brand-logo {
+  width: min(240px, 70vw);
+  height: auto;
+  margin: 0 auto 6px;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 180ms ease, transform 180ms ease;
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.35));
+}
+
+.brand-logo.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .title {
   font-size: 16px;
   font-weight: 600;
