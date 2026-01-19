@@ -103,3 +103,7 @@ html {
   font-size: 0.75rem;
   color: var(--card-muted);
 }
+
+.dwm-card-expanded {
+  max-height: 75vh !important;
+}

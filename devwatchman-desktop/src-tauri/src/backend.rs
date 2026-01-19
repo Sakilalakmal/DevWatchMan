@@ -298,6 +298,7 @@ fn spawn_sidecar(
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String>
 {
     let candidates = ["devwatchman-backend", "binaries/devwatchman-backend"];
+    let parent_pid = std::process::id().to_string();
 
     let mut last_err = None;
     for id in candidates {
@@ -306,6 +307,7 @@ fn spawn_sidecar(
             .sidecar(id)
             .map_err(|e| e.to_string())?
             .args(["--port", "0"])
+            .env("DEVWATCHMAN_PARENT_PID", &parent_pid)
             .spawn()
         {
             Ok(pair) => return Ok(pair),

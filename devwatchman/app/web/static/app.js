@@ -891,12 +891,13 @@ async function fetchAndRenderHistory(hours) {
   }
 }
 
-function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent) {
+function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent, netSentBps, netRecvBps) {
   if (!state.history.liveEnabled) return;
   ensureHistoryCharts();
   const cpuChart = state.history.charts.cpu;
   const ramChart = state.history.charts.ram;
-  if (!cpuChart || !ramChart) return;
+  const netChart = state.history.charts.net;
+  if (!cpuChart || !ramChart || !netChart) return;
 
   const t = Date.parse(tsUtc);
   const tsMs = Number.isFinite(t) ? t : Date.now();
@@ -908,6 +909,9 @@ function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent) {
   cpuChart.data.datasets[0].data.push(typeof cpuPercent === "number" ? cpuPercent : null);
   ramChart.data.labels.push(label);
   ramChart.data.datasets[0].data.push(typeof memPercent === "number" ? memPercent : null);
+  netChart.data.labels.push(label);
+  netChart.data.datasets[0].data.push(typeof netSentBps === "number" ? netSentBps : null);
+  netChart.data.datasets[1].data.push(typeof netRecvBps === "number" ? netRecvBps : null);
 
   const cutoff = Date.now() - Number(state.history.hours) * 60 * 60 * 1000;
   while (state.history.tsMs.length > 0 && state.history.tsMs[0] < cutoff) {
@@ -916,6 +920,9 @@ function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent) {
     cpuChart.data.datasets[0].data.shift();
     ramChart.data.labels.shift();
     ramChart.data.datasets[0].data.shift();
+    netChart.data.labels.shift();
+    netChart.data.datasets[0].data.shift();
+    netChart.data.datasets[1].data.shift();
   }
 
   const maxPoints = historyMaxPoints(state.history.hours);
@@ -925,10 +932,14 @@ function appendLiveHistoryPoint(tsUtc, cpuPercent, memPercent) {
     cpuChart.data.datasets[0].data.shift();
     ramChart.data.labels.shift();
     ramChart.data.datasets[0].data.shift();
+    netChart.data.labels.shift();
+    netChart.data.datasets[0].data.shift();
+    netChart.data.datasets[1].data.shift();
   }
 
   cpuChart.update("none");
   ramChart.update("none");
+  netChart.update("none");
 }
 
 function startFallback(summaryPoller, alertsPoller, networkPoller, processesPoller) {
@@ -1016,6 +1027,16 @@ function connectWebSocket({ onKpi, onChartPoint, onAlert, onTimelineEvent, onPro
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  const processesCard = $("processes-card");
+  const processesExpand = $("processes-expand");
+  if (processesCard && processesExpand) {
+    processesExpand.addEventListener("click", () => {
+      const expanded = processesCard.classList.toggle("dwm-card-expanded");
+      processesExpand.setAttribute("aria-expanded", expanded ? "true" : "false");
+      processesExpand.textContent = expanded ? "Collapse" : "Expand";
+    });
+  }
+
   applyTheme(getInitialTheme());
 
   updateWsBadge();
@@ -1170,7 +1191,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     },
     onChartPoint: (msg) => {
       const d = msg.data || {};
-      appendLiveHistoryPoint(msg.ts_utc, d.cpu_percent, d.mem_percent);
+      appendLiveHistoryPoint(msg.ts_utc, d.cpu_percent, d.mem_percent, d.net_sent_bps, d.net_recv_bps);
     },
     onAlert: (msg) => {
       const a = msg.data || null;

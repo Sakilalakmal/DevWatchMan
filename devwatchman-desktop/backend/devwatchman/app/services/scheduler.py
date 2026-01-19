@@ -67,6 +67,8 @@ class SnapshotScheduler:
         self._watch_port_last_state: dict[int, bool] = {}
         self._watch_port_last_info: dict[int, dict[str, Any]] = {}
         self._last_net_quality: str | None = None
+        self._last_ping_mono: float = 0.0
+        self._last_latency_ms: float | None = None
         self._docker_last_running: dict[str, bool] = {}
         self._docker_last_restart: dict[str, int] = {}
         self._docker_state_change_times: dict[str, deque[float]] = {}
@@ -205,9 +207,15 @@ class SnapshotScheduler:
             ports_watch_statuses = self._safe_collect(
                 "ports_watch", lambda: get_port_status(watch_ports)
             ) or []
-            latency_ms = await asyncio.to_thread(
-                ping_latency_ms, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
-            )
+            # Avoid pinging the network every snapshot tick. The local dashboard should
+            # still update throughput every second, but network quality can be slower.
+            latency_ms = self._last_latency_ms
+            if latency_ms is None or (now_mono - self._last_ping_mono) >= 10.0:
+                latency_ms = await asyncio.to_thread(
+                    ping_latency_ms, NETWORK_PING_HOST, NETWORK_PING_TIMEOUT_MS
+                )
+                self._last_latency_ms = latency_ms
+                self._last_ping_mono = now_mono
             net_quality = classify_network(latency_ms)
 
             port_info: dict[int, dict[str, Any]] = {}
@@ -369,6 +377,8 @@ class SnapshotScheduler:
                     "data": {
                         "cpu_percent": snapshot.get("cpu_percent"),
                         "mem_percent": snapshot.get("mem_percent"),
+                        "net_sent_bps": snapshot.get("net_sent_bps"),
+                        "net_recv_bps": snapshot.get("net_recv_bps"),
                     },
                 }
             )

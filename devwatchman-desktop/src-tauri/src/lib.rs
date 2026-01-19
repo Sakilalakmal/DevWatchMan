@@ -38,13 +38,14 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-
                 let manager = window.state::<BackendManager>().clone();
                 if let Some(child) = manager.take_child() {
                     let _ = child.kill();
                 }
-                let _ = window.close();
+
+                // Let Tauri close the window normally. Calling `prevent_close()` and then
+                // `window.close()` can recurse on some platforms and lead to crashes.
+                let _ = api;
             }
         })
         .invoke_handler(tauri::generate_handler![

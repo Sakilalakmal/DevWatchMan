@@ -6,6 +6,8 @@ import os
 import signal
 import socket
 import sys
+import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -49,6 +51,33 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     return parser.parse_args(argv)
 
+def _start_parent_watchdog() -> None:
+    parent_pid_raw = os.environ.get("DEVWATCHMAN_PARENT_PID")
+    if not parent_pid_raw:
+        return
+    try:
+        parent_pid = int(parent_pid_raw)
+    except Exception:
+        return
+    if parent_pid <= 0:
+        return
+
+    def _run() -> None:
+        try:
+            import psutil  # type: ignore
+        except Exception:
+            return
+        while True:
+            time.sleep(1.0)
+            try:
+                if not psutil.pid_exists(parent_pid):
+                    os._exit(0)
+            except Exception:
+                # If we can't check, don't crash the backend.
+                continue
+
+    threading.Thread(target=_run, name="parent-watchdog", daemon=True).start()
+
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(list(sys.argv[1:] if argv is None else argv))
@@ -60,6 +89,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # Must be the FIRST stdout line.
     print(f"DEVWATCHMAN_PORT={chosen_port}", flush=True)
+
+    _start_parent_watchdog()
 
     # Ensure backend source is importable.
     backend_root = Path(__file__).resolve().parent / "devwatchman"
